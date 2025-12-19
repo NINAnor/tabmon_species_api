@@ -1,0 +1,15 @@
+# Changes here will be overwritten by Copier
+_commit: v0.2.5
+_src_path: gh:ninanor/python-template
+author_name: benjamin cretois
+debug: false
+default_branch_name: main
+docker: true
+email: benjamin.cretois@nina.no
+notebook: false
+project_name: tabmon-species-api
+project_slug: tabmon-species-api
+repo_name: tabmon-species-api
+repo_org: ninanor
+template_type: python
+type_annotations: false

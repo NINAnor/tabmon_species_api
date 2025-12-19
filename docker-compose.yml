@@ -1,0 +1,20 @@
+services:
+  api-dashboard:
+    build:
+      context: .
+    environment:
+      RCLONE_CONFIG: /run/secrets/tabmon_rclone
+    secrets:
+      - tabmon_rclone
+    privileged: true
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    ports:
+      - "8501:8501"
+
+secrets:
+  tabmon_rclone:
+    #external: true
+    file: ~/.config/rclone/rclone.conf
