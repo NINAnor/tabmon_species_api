@@ -132,6 +132,10 @@ def main():
     st.markdown(f"**Listening Clip from file:** {result['filename']}  |  **BirdNET Confidence:** {result['confidence']}")
     st.audio(clip, format="audio/wav", sample_rate=48000)
 
+    # Add button to load a new detection
+    if st.button("🔄 Load New Detection", help="Get a new random detection for the same species and location"):
+        st.rerun()
+
 
 
     # Have a way for the user to annotate the clip like:
