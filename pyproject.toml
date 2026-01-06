@@ -1,3 +1,7 @@
+[dependency-groups]
+dev = [
+  "deptry"
+]
 
 [project]
 authors = [
@@ -9,7 +13,7 @@ dependencies = [
   "django-environ",
   "duckdb>=1.4.3",
   "librosa>=0.11.0",
-  "streamlit>=1.52.2",
+  "streamlit>=1.52.2"
 ]
 description = ""
 license = "GPL-3.0+"
@@ -18,14 +22,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 version = "0.1.0"
 
-
 [project.scripts]
 tabmon-species-api = "main:start"
-
-[dependency-groups]
-dev = [
-  "deptry",
-]
 
 [tool.ruff]
 fix = true

@@ -6,7 +6,7 @@ merged_predictions_light: one folder per country, inside one folder per device, 
 
 site_info: contains the site metadata, important because the deploymentID is in both merged_predictions_light and site_info, so can be used to join the site
 
-proj_tabmon_NINA, proj_tabmon_NINA_ES ... contains the raw audio files, which will 
+proj_tabmon_NINA, proj_tabmon_NINA_ES ... contains the raw audio files, which will
 
 frontend:
 
