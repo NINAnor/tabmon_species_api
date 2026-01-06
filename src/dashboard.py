@@ -7,68 +7,104 @@ from queries import (
     get_species_for_site,
     get_random_detection_clip
 )
-from config import SITE_INFO_PATH
-from utils import extract_clip, get_single_file_path, match_device_id_to_site, save_validation_response
+from config import SITE_INFO_PATH, DATA_PATH, LANGUAGE_MAPPING
+from utils import (
+    extract_clip, 
+    get_single_file_path, 
+    match_device_id_to_site, 
+    save_validation_response, 
+    get_species_display_names)
 
-def main():
-
-    if "session_id" not in st.session_state:
-        import uuid
-
-        st.session_state.session_id = str(uuid.uuid4())[:8]  # Short unique ID
-
-    # Page configuration
+def setup_page_config():
+    """Configure the Streamlit page settings."""
     st.set_page_config(
         page_title="TABMON Listening Lab",
         layout="wide",
         initial_sidebar_state="expanded",
-        page_icon="🎙️",
+        page_icon="🐦",
     )
 
-    # Add the logo
-    logo_path = Path("/app/assets/tabmon_logo.png")
-    st.sidebar.image(logo_path, width=300)
-    st.sidebar.markdown("---")
-
-    # Page configuration
-    st.set_page_config(
-        page_title="TABMON Listening Lab",
-        layout="wide",
-        initial_sidebar_state="expanded",
-        page_icon="🎙️",
-    )
+def render_page_header():
+    """Render the main page header and introduction."""
+    st.title("🐦 TABMON Listening Lab")
     
-    st.title("🎙️ TABMON Listening Lab")
-    st.markdown("This application makes it possible to explore our TABMON audio dataset and **listen to detected species clips.**")
-    st.markdown("The detections are based on automated species identification models (i.e. BirdNET 2.4) and **may not always be accurate.**")
-    st.markdown("Please use this tool to help validate and improve our models by listening to the clips and providing feedback!")
-    st.markdown("The first load may take a little while as the data is being processed. **Loading a new site/country can take a little bit of time (maximum 1 minute)**. However, **loading a new species or a new detection clip is almost instantaneous!**")
+    st.markdown("### Welcome to the TABMON Species Validation Tool! 🎧")
+    st.markdown("Help us improve bird species detection by listening to audio clips and confirming what you hear.")
+    
+    with st.expander("📖 How to use this tool", expanded=True):
+        st.markdown("""
+        **Simple 4-step process:**
+        1. **Select your preferences** in the sidebar (country, location, species, language for the name of the species)
+        2. **Listen** to the 3-second audio clip that appears
+        3. **Answer** whether you hear the selected species or not
+        4. **Rate your confidence** in your answer and submit
+        
+        **Your contributions help us:**
+        - ✅ Improve automatic bird detection models
+        - 🎯 Identify which species are harder to detect
+        - 🌍 Build better tools for biodiversity monitoring
+        """)
+    
+    # Performance expectations
+    with st.expander("⏱️ What to expect", expanded=True):
+        st.markdown("""
+        - **First load:** May take up to a minute as we process the data
+        - **Changing country/location:** Takes a few seconds to load new data  
+        - **New species or clips:** Nearly instant!
+        - **Languages:** Switch freely between scientific and common names
+        """)
+    
+    st.markdown("---")
 
+def render_sidebar_logo():
+    """Render the logo in the sidebar."""
+    logo_path = Path("/app/assets/tabmon_logo.png")
+    if logo_path.exists():
+        st.sidebar.image(logo_path, width=300)
+        st.sidebar.markdown("---")
+
+def get_user_selections():
+    """Handle all sidebar parameter selections and return the selected values."""
+    render_sidebar_logo()
     st.sidebar.header("🔍 Select the parameters")
 
-    # Country & device selection
+    # Language selector
+    selected_language = st.sidebar.selectbox(
+        "Species Name Language",
+        options=["Scientific Names"] + list(LANGUAGE_MAPPING.keys()),
+        help="Choose the language for species names"
+    )
+
+    # Country selection
     countries = get_available_countries()
     selected_country = st.sidebar.selectbox("Select Country", countries)
 
+    # Site selection
     devices = get_sites_for_country(selected_country)
     device_site_mapping = match_device_id_to_site(SITE_INFO_PATH)
     
-    # FAILSAFE - Maybe not necessary?
-    # Create filtered sites dictionary - only devices that have site mapping
     filtered_sites = {}
     for device in devices:
         if device in device_site_mapping:
             site_name = device_site_mapping[device]
             filtered_sites[site_name] = device
 
-    # Use site names in selectbox
     selected_site_name = st.sidebar.selectbox("Select Site", list(filtered_sites.keys()))
     selected_device = filtered_sites[selected_site_name]
     
+    # Species selection with translation
     detected_species = get_species_for_site(selected_country, selected_device)
-    selected_species = st.sidebar.selectbox("Select Species", detected_species)
+    
+    if selected_language == "Scientific Names":
+        species_display_map = {species: species for species in detected_species}
+    else:
+        language_code = LANGUAGE_MAPPING[selected_language]
+        species_display_map = get_species_display_names(detected_species, language_code)
+    
+    selected_species_display = st.sidebar.selectbox("Select Species", list(species_display_map.keys()))
+    selected_species = species_display_map[selected_species_display]
 
-    # Add confidence threshold selector
+    # Confidence threshold
     confidence_threshold = st.sidebar.slider(
         "Minimum Confidence Threshold",
         min_value=0.0,
@@ -78,45 +114,76 @@ def main():
         help="Only show clips with BirdNET confidence above this threshold"
     )
 
-    # Get and display detected species for this site
-    st.subheader(f"A random clip has been chosen for {selected_species} in {selected_country} at {selected_site_name}")
+    return {
+        'language': selected_language,
+        'country': selected_country,
+        'site_name': selected_site_name,
+        'device': selected_device,
+        'species': selected_species,
+        'species_display': selected_species_display,
+        'confidence_threshold': confidence_threshold
+    }
+
+def get_or_load_clip(selections):
+    """Get current clip from session state or load new one if parameters changed."""
+    # Initialize session state
+    if 'current_clip' not in st.session_state:
+        st.session_state.current_clip = None
+    if 'clip_params' not in st.session_state:
+        st.session_state.clip_params = None
+
+    # Create current parameters for comparison
+    current_params = (selections['country'], selections['device'], selections['species'], selections['confidence_threshold'])
     
-    # Get a random detection from the merged prediction, matching the site and country
-    result = get_random_detection_clip(selected_country, selected_device, selected_species, confidence_threshold)
+    # Only reload clip if parameters changed or no clip exists
+    if st.session_state.clip_params != current_params or st.session_state.current_clip is None:
+        st.session_state.current_clip = get_random_detection_clip(
+            selections['country'], 
+            selections['device'], 
+            selections['species'], 
+            selections['confidence_threshold']
+        )
+        st.session_state.clip_params = current_params
     
+    return st.session_state.current_clip
+
+def render_clip_section(result, selections):
+    """Render the audio clip section with player and metadata."""
     if not result:
-        st.warning(f"No clips found for {selected_species} at {selected_site_name}")
-        return
+        st.warning(f"No clips found for {selections['species_display']} at {selections['site_name']}")
+        return False
     
     # Check if all clips have been validated
     if result.get("all_validated"):
-        st.success(f"🎉 Congratulations! All {result['total_clips']} clips for {selected_species} at {selected_site_name} have been validated!")
+        st.success(f"🎉 Congratulations! All {result['total_clips']} clips for {selections['species_display']} at {selections['site_name']} have been validated!")
         st.info("✅ This species/location combination is complete. Try selecting a different species or location.")
         st.balloons()
-        return
+        return False
         
-    full_path = get_single_file_path(result["filename"], selected_country, selected_device)
+    # Load and display audio clip
+    full_path = get_single_file_path(result["filename"], selections['country'], selections['device'])
     clip = extract_clip(full_path, result["start_time"])
 
     st.markdown(f"**Listening Clip from file:** {result['filename']}  |  **BirdNET Confidence:** {result['confidence']}")
     st.audio(clip, format="audio/wav", sample_rate=48000)
+    
+    return True
 
-    # Add validation section
+def render_validation_form(result, selections):
+    """Render the validation form and handle submission."""
     st.divider()
     st.subheader("🎯 Validation")
-    st.markdown(f"**Is this detection a {selected_species}?**")
+    st.markdown(f"**Is this detection a {selections['species_display']}?**")
     
-    # Use form to prevent reloading on each radio button click
     with st.form("validation_form"):
         validation_response = st.radio(
             "Your answer:",
-            options=["Yes", "No", "Unknown"],
+            options=["Yes", "No", "Unsure"],
             index=None,
             horizontal=True,
             help="Help us validate the accuracy of our species detection models!"
         )
         
-        # Add confidence level question
         user_confidence = st.radio(
             "**How confident are you in your answer?**",
             options=["Low", "Moderate", "High"],
@@ -125,17 +192,15 @@ def main():
             help="Rate your confidence in the validation above"
         )
         
-        # Submit button (always visible in forms)
         submitted = st.form_submit_button("✅ Submit Validation", type="primary")
         
         if submitted and validation_response and user_confidence:
-            # Store validation response
             validation_data = {
                 'filename': result['filename'],
-                'country': selected_country,
-                'site': selected_site_name,
-                'device_id': selected_device,
-                'species': selected_species,
+                'country': selections['country'],
+                'site': selections['site_name'],
+                'device_id': selections['device'],
+                'species': selections['species'],
                 'start_time': result['start_time'],
                 'confidence': result['confidence'],
                 'validation_response': validation_response,
@@ -149,9 +214,40 @@ def main():
         elif submitted and (not validation_response or not user_confidence):
             st.error("Please answer both questions before submitting.")
 
-    # Add button to load a new detection
+def render_load_new_button():
+    """Render the load new detection button."""
     if st.button("🔄 Load New Detection", help="Get a new random detection for the same species and location"):
+        st.session_state.current_clip = None
+        st.session_state.clip_params = None
+        from queries import get_validated_clips
+        get_validated_clips.clear()
         st.rerun()
+
+def main():
+    """Main dashboard application."""
+    # Initialize session ID for tracking
+    if "session_id" not in st.session_state:
+        import uuid
+        st.session_state.session_id = str(uuid.uuid4())[:8]
+    
+    setup_page_config()
+    render_page_header()
+    
+    # Get user selections from sidebar
+    selections = get_user_selections()
+    
+    # Display current selection
+    st.subheader(f"A random clip has been chosen for {selections['species_display']} in {selections['country']} at {selections['site_name']}")
+    
+    # Get or load audio clip
+    result = get_or_load_clip(selections)
+    
+    # Render audio clip section
+    if render_clip_section(result, selections):
+        # Only show validation form if we have a valid clip
+        render_validation_form(result, selections)
+        # Always show the load new button when we have a valid clip
+        render_load_new_button()
 
 if __name__ == "__main__":
     main()

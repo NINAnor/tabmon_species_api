@@ -6,8 +6,6 @@ import pandas as pd
 from utils import get_validated_clips
 from config import PARQUET_DATASET, SITE_INFO_PATH
 
-
-# Initialize DuckDB connection
 @st.cache_resource
 def get_duckdb_connection():
     return duckdb.connect()

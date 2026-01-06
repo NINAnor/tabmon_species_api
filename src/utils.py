@@ -2,7 +2,7 @@ import librosa
 import streamlit as st
 import pandas as pd
 
-from config import DATA_PATH, VALIDATION_RESPONSES_PATH
+from config import DATA_PATH, VALIDATION_RESPONSES_PATH, BIRDNET_MULTILINGUAL_PATH
 
 def extract_clip(audio_file_path, start_time, sr=48000):
     audio_data, _ = librosa.load(audio_file_path, sr=sr, mono=True)
@@ -80,3 +80,29 @@ def match_device_id_to_site(site_info_path):
         device_site_map[row["DeviceID"]] = row["Site"]
 
     return device_site_map
+
+@st.cache_data
+def load_species_translations():
+    """Load the multilingual species name translations"""
+    return pd.read_csv(BIRDNET_MULTILINGUAL_PATH)
+
+def get_species_display_names(species_list, language_code):
+    """Convert scientific names to display names in selected language"""
+    if language_code == "Scientific_Name":
+        return {species: species for species in species_list}
+    
+    translations_df = load_species_translations()
+    species_map = {}
+    
+    for species in species_list:
+        translation_row = translations_df[translations_df['Scientific_Name'] == species]
+        if not translation_row.empty and language_code in translation_row.columns:
+            translated_name = translation_row[language_code].iloc[0]
+            if pd.notna(translated_name):
+                species_map[translated_name] = species
+            else:
+                species_map[species] = species  # Fallback to scientific name
+        else:
+            species_map[species] = species  # Fallback to scientific name
+    
+    return species_map
