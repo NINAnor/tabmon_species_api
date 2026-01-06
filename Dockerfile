@@ -26,6 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project
 
 ADD src/ /app/src
+ADD assets/ /app/assets
 COPY entrypoint.sh /app/
 
 # Create mount point

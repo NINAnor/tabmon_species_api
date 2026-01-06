@@ -11,8 +11,25 @@ from config import SITE_INFO_PATH
 from utils import extract_clip, get_single_file_path, match_device_id_to_site, save_validation_response
 
 def main():
-    """Main dashboard application."""
-    
+
+    if "session_id" not in st.session_state:
+        import uuid
+
+        st.session_state.session_id = str(uuid.uuid4())[:8]  # Short unique ID
+
+    # Page configuration
+    st.set_page_config(
+        page_title="TABMON Listening Lab",
+        layout="wide",
+        initial_sidebar_state="expanded",
+        page_icon="🎙️",
+    )
+
+    # Add the logo
+    logo_path = Path("/app/assets/tabmon_logo.png")
+    st.sidebar.image(logo_path, width=300)
+    st.sidebar.markdown("---")
+
     # Page configuration
     st.set_page_config(
         page_title="TABMON Listening Lab",

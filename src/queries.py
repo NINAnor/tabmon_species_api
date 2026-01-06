@@ -83,7 +83,7 @@ def get_random_detection_clip(country, device_id, species, confidence_threshold=
     
     # Find first clip that hasn't been validated
     for result in results:
-        clip_key = (result[0], result[1])  # (filename, start_time)
+        clip_key = (result[0], result[1]) 
         if clip_key not in validated_clips:
             return {
                 "filename": result[0],
