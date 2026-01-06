@@ -4,69 +4,11 @@ import pandas as pd
 from queries import (
     get_available_countries,
     get_sites_for_country,
-    match_device_id_to_site,
     get_species_for_site,
-    get_audio_files_for_species,
-    get_random_detection_clip,
-    SITE_INFO_PATH,
-    DATA_PATH
+    get_random_detection_clip
 )
-
-from utils import extract_clip
-
-def get_single_file_path(filename, country, deployment_id):
-    """Get the full path for a single audio file."""
-    if country == "France":
-        suffix = "_FR"
-    elif country == "Spain":
-        suffix = "_ES"
-    elif country == "Netherlands":
-        suffix = "_NL"
-    elif country == "Norway":
-        suffix = ""
-
-    deviceID = deployment_id.split("_")[-1]
-    proj_path = DATA_PATH / f"proj_tabmon_NINA{suffix}"
-
-    if proj_path.exists():
-        device_dirs = list(proj_path.glob(f"bugg_RPiID-*{deviceID}"))
-        if device_dirs:
-            device_path = device_dirs[0]
-            possible_files = list(device_path.glob(f"*/{filename}"))
-            if possible_files:
-                return str(possible_files[0])
-    return "File not found"
-
-def get_full_file_path(files_df, country, deployment_id):
-
-    if country == "France":
-        suffix = "_FR"
-    elif country == "Spain":
-        suffix = "_ES"
-    elif country == "Netherlands":
-        suffix = "_NL"
-    elif country == "Norway":
-        suffix = ""
-
-    deviceID = deployment_id.split("_")[-1]
-    proj_path = DATA_PATH / f"proj_tabmon_NINA{suffix}"
-
-    #TODO: Optimize by matching the filepath to the index.parquet file
-    # For example, take a random filename from the dataframe, and find its full path
-    # in the index.parquet that references all the audio files in the project
-    def find_actual_path(filename):
-        if proj_path.exists():
-            device_dirs = list(proj_path.glob(f"bugg_RPiID-*{deviceID}"))
-            if device_dirs:
-                device_path = device_dirs[0]
-                possible_files = list(device_path.glob(f"*/{filename}"))
-                if possible_files:
-                    return str(possible_files[0])
-        return "File not found"
-
-    files_df["full_file_path"] = files_df["Audio files"].apply(find_actual_path)
-
-    return files_df
+from config import SITE_INFO_PATH
+from utils import extract_clip, get_single_file_path, match_device_id_to_site, save_validation_response
 
 def main():
     """Main dashboard application."""
@@ -83,7 +25,8 @@ def main():
     st.markdown("This application makes it possible to explore our TABMON audio dataset and **listen to detected species clips.**")
     st.markdown("The detections are based on automated species identification models (i.e. BirdNET 2.4) and **may not always be accurate.**")
     st.markdown("Please use this tool to help validate and improve our models by listening to the clips and providing feedback!")
-    
+    st.markdown("The first load may take a little while as the data is being processed. **Loading a new site/country can take a little bit of time (maximum 1 minute)**. However, **loading a new species or a new detection clip is almost instantaneous!**")
+
     st.sidebar.header("🔍 Select the parameters")
 
     # Country & device selection
@@ -108,39 +51,90 @@ def main():
     detected_species = get_species_for_site(selected_country, selected_device)
     selected_species = st.sidebar.selectbox("Select Species", detected_species)
 
+    # Add confidence threshold selector
+    confidence_threshold = st.sidebar.slider(
+        "Minimum Confidence Threshold",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.0,
+        step=0.1,
+        help="Only show clips with BirdNET confidence above this threshold"
+    )
+
     # Get and display detected species for this site
     st.subheader(f"A random clip has been chosen for {selected_species} in {selected_country} at {selected_site_name}")
     
-    # Find the files containing the species audio
-    #with st.spinner("Loading files where the species has been found..."):
-    #    audio_files = get_audio_files_for_species(selected_country, selected_device, selected_species)
-
-    #if audio_files:
-    #    st.write(f"**Total files where species detected:** {len(audio_files)}")
-    #    file_df = pd.DataFrame({"Audio files": audio_files})
-    #    file_df_full_path = get_full_file_path(file_df, selected_country, selected_device)
-    #    st.subheader("📋 File List")
-    #    st.dataframe(file_df_full_path, use_container_width=True, height=400)  
-    #else:
-    #    st.warning(f"No species found for {selected_country} - {selected_device}")
-    
     # Get a random detection from the merged prediction, matching the site and country
-    result = get_random_detection_clip(selected_country, selected_device, selected_species)
+    result = get_random_detection_clip(selected_country, selected_device, selected_species, confidence_threshold)
+    
+    if not result:
+        st.warning(f"No clips found for {selected_species} at {selected_site_name}")
+        return
+    
+    # Check if all clips have been validated
+    if result.get("all_validated"):
+        st.success(f"🎉 Congratulations! All {result['total_clips']} clips for {selected_species} at {selected_site_name} have been validated!")
+        st.info("✅ This species/location combination is complete. Try selecting a different species or location.")
+        st.balloons()
+        return
+        
     full_path = get_single_file_path(result["filename"], selected_country, selected_device)
     clip = extract_clip(full_path, result["start_time"])
 
     st.markdown(f"**Listening Clip from file:** {result['filename']}  |  **BirdNET Confidence:** {result['confidence']}")
     st.audio(clip, format="audio/wav", sample_rate=48000)
 
+    # Add validation section
+    st.divider()
+    st.subheader("🎯 Validation")
+    st.markdown(f"**Is this detection a {selected_species}?**")
+    
+    # Use form to prevent reloading on each radio button click
+    with st.form("validation_form"):
+        validation_response = st.radio(
+            "Your answer:",
+            options=["Yes", "No", "Unknown"],
+            index=None,
+            horizontal=True,
+            help="Help us validate the accuracy of our species detection models!"
+        )
+        
+        # Add confidence level question
+        user_confidence = st.radio(
+            "**How confident are you in your answer?**",
+            options=["Low", "Moderate", "High"],
+            index=None,
+            horizontal=True,
+            help="Rate your confidence in the validation above"
+        )
+        
+        # Submit button (always visible in forms)
+        submitted = st.form_submit_button("✅ Submit Validation", type="primary")
+        
+        if submitted and validation_response and user_confidence:
+            # Store validation response
+            validation_data = {
+                'filename': result['filename'],
+                'country': selected_country,
+                'site': selected_site_name,
+                'device_id': selected_device,
+                'species': selected_species,
+                'start_time': result['start_time'],
+                'confidence': result['confidence'],
+                'validation_response': validation_response,
+                'user_confidence': user_confidence,
+                'timestamp': pd.Timestamp.now()
+            }
+            
+            save_validation_response(validation_data)
+            st.success(f"✅ Thank you for your time and effort!")
+            st.balloons()
+        elif submitted and (not validation_response or not user_confidence):
+            st.error("Please answer both questions before submitting.")
+
     # Add button to load a new detection
     if st.button("🔄 Load New Detection", help="Get a new random detection for the same species and location"):
         st.rerun()
-
-
-
-    # Have a way for the user to annotate the clip like:
-    # Is it the correct species? Yes/No, if no, what species is it?
-
 
 if __name__ == "__main__":
     main()

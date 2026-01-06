@@ -3,10 +3,9 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-# DATA PATH FROM THE MOUNT
-DATA_PATH = Path("/data")
-PARQUET_DATASET = "/data/merged_predictions_light/*/*/*.parquet"
-SITE_INFO_PATH = DATA_PATH / "site_info.csv"
+from utils import get_validated_clips
+from config import PARQUET_DATASET, SITE_INFO_PATH
+
 
 # Initialize DuckDB connection
 @st.cache_resource
@@ -41,15 +40,6 @@ def get_sites_for_country(country):
     result = conn.execute(query, [country]).fetchall()
     return [row[0] for row in result]
 
-def match_device_id_to_site(site_info_path):
-    site_info_df = pd.read_csv(site_info_path)
-    
-    device_site_map = {}
-    for _, row in site_info_df.iterrows():
-        device_site_map[row["DeviceID"]] = row["Site"]
-
-    return device_site_map
-
 @st.cache_data
 def get_species_for_site(country, device_id):
     conn = get_duckdb_connection()
@@ -76,21 +66,35 @@ def get_audio_files_for_species(country, device_id, species):
     result = conn.execute(query, [country, device_id, species]).fetchall()
     return [row[0] for row in result]
 
-
-def get_random_detection_clip(country, device_id, species):
+def get_random_detection_clip(country, device_id, species, confidence_threshold=0.0):
     conn = get_duckdb_connection()
+    
+    # Get already validated clips
+    validated_clips = get_validated_clips(country, device_id, species)
+    
+    # Get all potential clips with confidence filter
     query = f"""
     SELECT filename, "start time", confidence
     FROM '{PARQUET_DATASET}'
-    WHERE country = ? AND device_id = ? AND "scientific name" = ?
+    WHERE country = ? AND device_id = ? AND "scientific name" = ? AND confidence >= ?
     ORDER BY RANDOM()
-    LIMIT 1
     """
-    result = conn.execute(query, [country, device_id, species]).fetchone()
-    if result:
+    results = conn.execute(query, [country, device_id, species, confidence_threshold]).fetchall()
+    
+    # Find first clip that hasn't been validated
+    for result in results:
+        clip_key = (result[0], result[1])  # (filename, start_time)
+        if clip_key not in validated_clips:
+            return {
+                "filename": result[0],
+                "start_time": result[1],
+                "confidence": result[2],
+            }
+    
+    if results and len(validated_clips) > 0:
         return {
-            "filename": result[0],
-            "start_time": result[1],
-            "confidence": result[2],
+            "all_validated": True,
+            "total_clips": len(results),
+            "validated_count": len(validated_clips)
         }
     return None
