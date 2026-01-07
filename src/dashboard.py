@@ -176,10 +176,12 @@ def render_clip_section(result, selections):
     with st.container(border=True):
         st.markdown("### 🎵 Audio Clip")
 
-        full_path = get_single_file_path(
-            result["filename"], selections["country"], selections["device"]
-        )
-        clip = extract_clip(full_path, result["start_time"])
+        # Show loading while extracting clip
+        with st.spinner("Loading audio clip..."):
+            full_path = get_single_file_path(
+                result["filename"], selections["country"], selections["device"]
+            )
+            clip = extract_clip(full_path, result["start_time"])
 
         col1, col2 = st.columns(2)
         with col1:
