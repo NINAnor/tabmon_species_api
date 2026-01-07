@@ -83,56 +83,65 @@ def get_all_clips_for_species(country, device_id, species, confidence_threshold=
     results = conn.execute(
         query, [country, device_id, species, confidence_threshold]
     ).fetchall()
-    
-    clips_data = [{
-        "filename": result[0],
-        "start_time": result[1], 
-        "confidence": result[2]
-    } for result in results]
-    
+
+    clips_data = [
+        {"filename": result[0], "start_time": result[1], "confidence": result[2]}
+        for result in results
+    ]
+
     return clips_data, len(results)
 
 
-def get_random_detection_clip(country, device_id, species, confidence_threshold=0.0):
-    """Optimized version that uses cached data and session state for better performance."""
-    # Get all clips data (cached)
+def get_random_detection_clip(
+    country, device_id, species, confidence_threshold=0.0, bypass_cache=False
+):
+    """Optimized version that uses cached data and session state for better performance.
+    bypass_cache: If True, forces fresh database query instead of using cached data.
+    """
+    # Get all clips data (bypass cache if requested for immediate fresh data)
+    if bypass_cache:
+        # Force fresh query by temporarily clearing cache
+        get_all_clips_for_species.clear()
+        get_validated_clips.clear()
+
     all_clips, total_clips = get_all_clips_for_species(
         country, device_id, species, confidence_threshold
     )
-    
+
     if not all_clips:
         return None
-    
+
     # Get already validated clips
     validated_clips = get_validated_clips(country, device_id, species)
-    
+
     # Filter out validated clips
     unvalidated_clips = [
-        clip for clip in all_clips
+        clip
+        for clip in all_clips
         if (clip["filename"], clip["start_time"]) not in validated_clips
     ]
-    
+
     if not unvalidated_clips:
         return {
             "all_validated": True,
             "total_clips": total_clips,
             "validated_count": len(validated_clips),
         }
-    
-    # Return a random unvalidated clip
+
     import random
+
     return random.choice(unvalidated_clips)
 
 
 def get_remaining_clips_count(country, device_id, species, confidence_threshold):
-    """Optimized version that uses cached clip data instead of separate database query."""
+    """Use cached clip data instead of separate database query."""
     # Use cached clip data
     _, total_clips = get_all_clips_for_species(
         country, device_id, species, confidence_threshold
     )
-    
+
     # Get validated clips count
     validated_clips = get_validated_clips(country, device_id, species)
     validated_count = len(validated_clips)
-    
+
     return max(0, total_clips - validated_count)

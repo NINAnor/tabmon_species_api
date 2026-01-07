@@ -13,6 +13,7 @@ dependencies = [
   "django-environ",
   "duckdb>=1.4.3",
   "librosa>=0.11.0",
+  "pandas>=2.0.0",
   "streamlit>=1.52.2"
 ]
 description = ""
@@ -25,9 +26,14 @@ version = "0.1.0"
 [project.scripts]
 tabmon-species-api = "main:start"
 
+[tool.deptry]
+# Ignore local modules and unused deps
+ignore = ["DEP001", "DEP002"]
+known_first_party = ["config", "queries", "utils"]
+
 [tool.ruff]
 fix = true
 
 [tool.ruff.lint]
-ignore = ["COM812"]
+ignore = ["COM812", "S608", "S311"]
 select = ["E", "W", "I", "F", "UP", "S", "B", "A", "COM", "LOG", "PTH", "Q"]

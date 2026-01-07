@@ -34,7 +34,8 @@ def render_page_header():
 
     st.markdown("### Welcome to the TABMON Species Validation Tool! 🎧")
     st.markdown(
-        "Help us improve bird species detection by listening to audio clips and confirming what you hear." \
+        "Help us improve bird species detection by listening to audio clips and "
+        "confirming what you hear. "
         "Please wait a minute or two for the application to initialize!"
     )
 
@@ -152,17 +153,22 @@ def render_clip_section(result, selections):
     """Render the audio clip section with player and metadata."""
     if not result:
         st.warning(
-            f"No clips found for {selections['species_display']} at {selections['site_name']}"
+            f"No clips found for {selections['species_display']} at "
+            f"{selections['site_name']}"
         )
         return False
 
     # Check if all clips have been validated
     if result.get("all_validated"):
         st.success(
-            f"🎉 Congratulations! All {result['total_clips']} clips for {selections['species_display']} at {selections['site_name']} above the confidence threshold of {selections['confidence_threshold']} have been validated!"
+            f"🎉 Congratulations! All {result['total_clips']} clips for "
+            f"{selections['species_display']} at {selections['site_name']} "
+            f"above the confidence threshold of {selections['confidence_threshold']} "
+            f"have been validated!"
         )
         st.info(
-            "✅ This species/location combination is complete. Try selecting a different species or location."
+            "✅ This species/location combination is complete. "
+            "Try selecting a different species or location."
         )
         st.balloons()
         return False
@@ -194,16 +200,19 @@ def render_validation_form(result, selections):
     with st.container(border=True):
         st.markdown("### 🎯 Validation")
         st.markdown(f"**Is this detection a {selections['species_display']}?**")
-        
+
         # Show remaining clips count
         remaining_clips = get_remaining_clips_count(
             selections["country"],
             selections["device"],
             selections["species"],
-            selections["confidence_threshold"]
+            selections["confidence_threshold"],
         )
         if remaining_clips > 0:
-            st.info(f"📊 Still **{remaining_clips}** clips to annotate for your current parameters")
+            st.info(
+                f"📊 Still **{remaining_clips}** clips to annotate for your "
+                f"current parameters"
+            )
         else:
             st.success("🎉 All clips validated for these parameters!")
 
@@ -243,28 +252,31 @@ def render_validation_form(result, selections):
             }
 
             save_validation_response(validation_data)
-            
+
             # Clear session state to load a new clip automatically
             st.session_state.current_clip = None
             st.session_state.clip_params = None
             st.session_state.clip_queue = []  # Clear clip queue
-            
+
             # Clear caches to ensure fresh data
-            from queries import get_validated_clips, get_all_clips_for_species
+            from queries import get_all_clips_for_species, get_validated_clips
+
             get_validated_clips.clear()
             get_all_clips_for_species.clear()  # Clear the new cached function
-            
+
             st.success("✅ Thank you for your time and effort!")
-            st.rerun() 
+            st.rerun()
         elif submitted and (not validation_response or not user_confidence):
             st.error("Please answer both questions before submitting.")
+
 
 @st.cache_data
 def render_explanations_section():
     with st.expander("📖 How to use this tool", expanded=True):
         st.markdown("""
         **Simple 4-step process:**
-        1. **Select your preferences** in the sidebar (country, location, species, language for the name of the species)
+        1. **Select your preferences** in the sidebar (country, location, species,
+           language for the name of the species)
         2. **Listen** to the 3-second audio clip that appears
         3. **Answer** whether you hear the selected species or not
         4. **Rate your confidence** in your answer and submit
@@ -282,6 +294,7 @@ def render_explanations_section():
         - **Languages:** Switch freely between scientific and common names
         """)
 
+
 st.markdown("---")
 
 
@@ -294,7 +307,7 @@ def render_load_new_button():
         st.session_state.current_clip = None
         st.session_state.clip_params = None
         st.session_state.clip_queue = []  # Clear clip queue
-        from queries import get_validated_clips, get_all_clips_for_species
+        from queries import get_all_clips_for_species, get_validated_clips
 
         get_validated_clips.clear()
         get_all_clips_for_species.clear()  # Clear the new cached function
@@ -330,7 +343,8 @@ def main():
                 st.markdown("### 🎯 Validation")
                 if not result or not clip_loaded:
                     st.info(
-                        "Select your parameters and an audio clip will appear for validation."
+                        "Select your parameters and an audio clip will appear for "
+                        "validation."
                     )
                 elif result.get("all_validated"):
                     st.success("All clips validated for this combination!")
