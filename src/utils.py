@@ -53,7 +53,7 @@ def save_validation_response(validation_data):
     return True
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_validated_clips(country, device_id, species):
     if not VALIDATION_RESPONSES_PATH.exists():
         return set()

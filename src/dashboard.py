@@ -17,7 +17,6 @@ from utils import (
     get_species_display_names,
     match_device_id_to_site,
     save_validation_response,
-    get_validated_clips,
 )
 
 
@@ -117,6 +116,8 @@ def get_or_load_clip(selections):
         st.session_state.current_clip = None
     if "clip_params" not in st.session_state:
         st.session_state.clip_params = None
+    if "clip_queue" not in st.session_state:
+        st.session_state.clip_queue = []
 
     current_params = (
         selections["country"],
@@ -125,18 +126,24 @@ def get_or_load_clip(selections):
         selections["confidence_threshold"],
     )
 
-    # Only reload clip if parameters changed or no clip exists
-    if (
-        st.session_state.clip_params != current_params
-        or st.session_state.current_clip is None
-    ):
-        st.session_state.current_clip = get_random_detection_clip(
+    # If parameters changed, clear queue and reload
+    if st.session_state.clip_params != current_params:
+        st.session_state.clip_queue = []
+        st.session_state.clip_params = current_params
+        st.session_state.current_clip = None
+
+    # If queue is empty or current clip is None, get new clip
+    if not st.session_state.clip_queue or st.session_state.current_clip is None:
+        clip_result = get_random_detection_clip(
             selections["country"],
             selections["device"],
             selections["species"],
             selections["confidence_threshold"],
-        ) # THE BOTTLENEC IS HERE AS I MAKE THE WHOLE QUERY EVERYTIME
-        st.session_state.clip_params = current_params
+        )
+        st.session_state.current_clip = clip_result
+    else:
+        # Use existing clip
+        pass
 
     return st.session_state.current_clip
 
@@ -240,10 +247,12 @@ def render_validation_form(result, selections):
             # Clear session state to load a new clip automatically
             st.session_state.current_clip = None
             st.session_state.clip_params = None
+            st.session_state.clip_queue = []  # Clear clip queue
             
-            # Clear validation cache to ensure fresh random selection
-            from queries import get_validated_clips
+            # Clear caches to ensure fresh data
+            from queries import get_validated_clips, get_all_clips_for_species
             get_validated_clips.clear()
+            get_all_clips_for_species.clear()  # Clear the new cached function
             
             st.success("✅ Thank you for your time and effort!")
             st.rerun() 
@@ -269,8 +278,7 @@ def render_explanations_section():
     with st.expander("⏱️ What to expect", expanded=True):
         st.markdown("""
         - **First load:** May take up to a minute as we process the data
-        - **Changing country/location:** Takes a few seconds to load new data
-        - **New species or clips:** Nearly instant!
+        - **Changing country/location/species:** Takes a few seconds to load new data
         - **Languages:** Switch freely between scientific and common names
         """)
 
@@ -285,9 +293,11 @@ def render_load_new_button():
     ):
         st.session_state.current_clip = None
         st.session_state.clip_params = None
-        from queries import get_validated_clips
+        st.session_state.clip_queue = []  # Clear clip queue
+        from queries import get_validated_clips, get_all_clips_for_species
 
         get_validated_clips.clear()
+        get_all_clips_for_species.clear()  # Clear the new cached function
         st.rerun()
 
 

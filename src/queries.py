@@ -68,57 +68,68 @@ def get_audio_files_for_species(country, device_id, species):
     return [row[0] for row in result]
 
 
-def get_random_detection_clip(country, device_id, species, confidence_threshold=0.0):
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_all_clips_for_species(country, device_id, species, confidence_threshold=0.0):
+    """Get all clips for a species/location combination with confidence filtering.
+    Returns tuple of (all_clips_data, total_count) for efficient processing.
+    """
     conn = get_duckdb_connection()
-
-    # Get already validated clips
-    validated_clips = get_validated_clips(country, device_id, species)
-
-    # Get all potential clips with confidence filter
     query = f"""
     SELECT filename, "start time", confidence
     FROM '{PARQUET_DATASET}'
     WHERE country = ? AND device_id = ? AND "scientific name" = ? AND confidence >= ?
-    ORDER BY RANDOM()
+    ORDER BY confidence DESC  -- Order by confidence instead of random for consistency
     """
     results = conn.execute(
         query, [country, device_id, species, confidence_threshold]
     ).fetchall()
+    
+    clips_data = [{
+        "filename": result[0],
+        "start_time": result[1], 
+        "confidence": result[2]
+    } for result in results]
+    
+    return clips_data, len(results)
 
-    # Find first clip that hasn't been validated
-    for result in results:
-        clip_key = (result[0], result[1])
-        if clip_key not in validated_clips:
-            return {
-                "filename": result[0],
-                "start_time": result[1],
-                "confidence": result[2],
-            }
 
-    if results and len(validated_clips) > 0:
+def get_random_detection_clip(country, device_id, species, confidence_threshold=0.0):
+    """Optimized version that uses cached data and session state for better performance."""
+    # Get all clips data (cached)
+    all_clips, total_clips = get_all_clips_for_species(
+        country, device_id, species, confidence_threshold
+    )
+    
+    if not all_clips:
+        return None
+    
+    # Get already validated clips
+    validated_clips = get_validated_clips(country, device_id, species)
+    
+    # Filter out validated clips
+    unvalidated_clips = [
+        clip for clip in all_clips
+        if (clip["filename"], clip["start_time"]) not in validated_clips
+    ]
+    
+    if not unvalidated_clips:
         return {
             "all_validated": True,
-            "total_clips": len(results),
+            "total_clips": total_clips,
             "validated_count": len(validated_clips),
         }
-    return None
+    
+    # Return a random unvalidated clip
+    import random
+    return random.choice(unvalidated_clips)
 
 
 def get_remaining_clips_count(country, device_id, species, confidence_threshold):
-    """Get the number of remaining clips to validate for current parameters."""
-    # Get total clips for this combination
-    conn = get_duckdb_connection()
-    query = f"""
-    SELECT COUNT(*) 
-    FROM '{PARQUET_DATASET}'
-    WHERE country = ? AND device_id = ? AND "scientific name" = ? AND confidence >= ?
-    """
-    total_clips = conn.execute(query, [
-        country, 
-        device_id, 
-        species, 
-        confidence_threshold
-    ]).fetchone()[0]
+    """Optimized version that uses cached clip data instead of separate database query."""
+    # Use cached clip data
+    _, total_clips = get_all_clips_for_species(
+        country, device_id, species, confidence_threshold
+    )
     
     # Get validated clips count
     validated_clips = get_validated_clips(country, device_id, species)
