@@ -102,3 +102,26 @@ def get_random_detection_clip(country, device_id, species, confidence_threshold=
             "validated_count": len(validated_clips),
         }
     return None
+
+
+def get_remaining_clips_count(country, device_id, species, confidence_threshold):
+    """Get the number of remaining clips to validate for current parameters."""
+    # Get total clips for this combination
+    conn = get_duckdb_connection()
+    query = f"""
+    SELECT COUNT(*) 
+    FROM '{PARQUET_DATASET}'
+    WHERE country = ? AND device_id = ? AND "scientific name" = ? AND confidence >= ?
+    """
+    total_clips = conn.execute(query, [
+        country, 
+        device_id, 
+        species, 
+        confidence_threshold
+    ]).fetchone()[0]
+    
+    # Get validated clips count
+    validated_clips = get_validated_clips(country, device_id, species)
+    validated_count = len(validated_clips)
+    
+    return max(0, total_clips - validated_count)

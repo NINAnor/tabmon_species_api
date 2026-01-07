@@ -7,6 +7,7 @@ from config import LANGUAGE_MAPPING, SITE_INFO_PATH
 from queries import (
     get_available_countries,
     get_random_detection_clip,
+    get_remaining_clips_count,
     get_sites_for_country,
     get_species_for_site,
 )
@@ -16,6 +17,7 @@ from utils import (
     get_species_display_names,
     match_device_id_to_site,
     save_validation_response,
+    get_validated_clips,
 )
 
 
@@ -33,7 +35,8 @@ def render_page_header():
 
     st.markdown("### Welcome to the TABMON Species Validation Tool! 🎧")
     st.markdown(
-        "Help us improve bird species detection by listening to audio clips and confirming what you hear."
+        "Help us improve bird species detection by listening to audio clips and confirming what you hear." \
+        "Please wait a minute or two for the application to initialize!"
     )
 
 
@@ -132,7 +135,7 @@ def get_or_load_clip(selections):
             selections["device"],
             selections["species"],
             selections["confidence_threshold"],
-        )
+        ) # THE BOTTLENEC IS HERE AS I MAKE THE WHOLE QUERY EVERYTIME
         st.session_state.clip_params = current_params
 
     return st.session_state.current_clip
@@ -149,7 +152,7 @@ def render_clip_section(result, selections):
     # Check if all clips have been validated
     if result.get("all_validated"):
         st.success(
-            f"🎉 Congratulations! All {result['total_clips']} clips for {selections['species_display']} at {selections['site_name']} above the confidence threshold of {selections['confidences']} have been validated!"
+            f"🎉 Congratulations! All {result['total_clips']} clips for {selections['species_display']} at {selections['site_name']} above the confidence threshold of {selections['confidence_threshold']} have been validated!"
         )
         st.info(
             "✅ This species/location combination is complete. Try selecting a different species or location."
@@ -184,6 +187,18 @@ def render_validation_form(result, selections):
     with st.container(border=True):
         st.markdown("### 🎯 Validation")
         st.markdown(f"**Is this detection a {selections['species_display']}?**")
+        
+        # Show remaining clips count
+        remaining_clips = get_remaining_clips_count(
+            selections["country"],
+            selections["device"],
+            selections["species"],
+            selections["confidence_threshold"]
+        )
+        if remaining_clips > 0:
+            st.info(f"📊 Still **{remaining_clips}** clips to annotate for your current parameters")
+        else:
+            st.success("🎉 All clips validated for these parameters!")
 
         with st.form("validation_form"):
             validation_response = st.radio(
@@ -221,10 +236,45 @@ def render_validation_form(result, selections):
             }
 
             save_validation_response(validation_data)
+            
+            # Clear session state to load a new clip automatically
+            st.session_state.current_clip = None
+            st.session_state.clip_params = None
+            
+            # Clear validation cache to ensure fresh random selection
+            from queries import get_validated_clips
+            get_validated_clips.clear()
+            
             st.success("✅ Thank you for your time and effort!")
-            st.balloons()
+            st.rerun() 
         elif submitted and (not validation_response or not user_confidence):
             st.error("Please answer both questions before submitting.")
+
+@st.cache_data
+def render_explanations_section():
+    with st.expander("📖 How to use this tool", expanded=True):
+        st.markdown("""
+        **Simple 4-step process:**
+        1. **Select your preferences** in the sidebar (country, location, species, language for the name of the species)
+        2. **Listen** to the 3-second audio clip that appears
+        3. **Answer** whether you hear the selected species or not
+        4. **Rate your confidence** in your answer and submit
+
+        **Your contributions help us:**
+        - ✅ Improve automatic bird detection models
+        - 🎯 Identify which species are harder to detect
+        - 🌍 Build better tools for biodiversity monitoring
+        """)
+
+    with st.expander("⏱️ What to expect", expanded=True):
+        st.markdown("""
+        - **First load:** May take up to a minute as we process the data
+        - **Changing country/location:** Takes a few seconds to load new data
+        - **New species or clips:** Nearly instant!
+        - **Languages:** Switch freely between scientific and common names
+        """)
+
+st.markdown("---")
 
 
 def render_load_new_button():
@@ -255,29 +305,7 @@ def main():
     col1, col2 = st.columns([1, 1])
 
     with col1:
-        with st.expander("📖 How to use this tool", expanded=True):
-            st.markdown("""
-            **Simple 4-step process:**
-            1. **Select your preferences** in the sidebar (country, location, species, language for the name of the species)
-            2. **Listen** to the 3-second audio clip that appears
-            3. **Answer** whether you hear the selected species or not
-            4. **Rate your confidence** in your answer and submit
-
-            **Your contributions help us:**
-            - ✅ Improve automatic bird detection models
-            - 🎯 Identify which species are harder to detect
-            - 🌍 Build better tools for biodiversity monitoring
-            """)
-
-        with st.expander("⏱️ What to expect", expanded=True):
-            st.markdown("""
-            - **First load:** May take up to a minute as we process the data
-            - **Changing country/location:** Takes a few seconds to load new data
-            - **New species or clips:** Nearly instant!
-            - **Languages:** Switch freely between scientific and common names
-            """)
-
-    st.markdown("---")
+        render_explanations_section()
 
     with col2:
         result = get_or_load_clip(selections)
