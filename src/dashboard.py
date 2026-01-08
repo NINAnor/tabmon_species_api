@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from config import LANGUAGE_MAPPING, SITE_INFO_PATH
+from config import LANGUAGE_MAPPING, SITE_INFO_S3_PATH
 from queries import (
     get_available_countries,
     get_random_detection_clip,
@@ -64,7 +64,7 @@ def get_user_selections():
 
     # Site selection
     devices = get_sites_for_country(selected_country)
-    device_site_mapping = match_device_id_to_site(SITE_INFO_PATH)
+    device_site_mapping = match_device_id_to_site(SITE_INFO_S3_PATH)
 
     filtered_sites = {}
     for device in devices:
@@ -176,7 +176,6 @@ def render_clip_section(result, selections):
     with st.container(border=True):
         st.markdown("### 🎵 Audio Clip")
 
-        # Show loading while extracting clip
         with st.spinner("Loading audio clip..."):
             full_path = get_single_file_path(
                 result["filename"], selections["country"], selections["device"]
@@ -254,17 +253,6 @@ def render_validation_form(result, selections):
             }
 
             save_validation_response(validation_data)
-
-            # Clear session state to load a new clip automatically
-            st.session_state.current_clip = None
-            st.session_state.clip_params = None
-            st.session_state.clip_queue = []  # Clear clip queue
-
-            # Clear caches to ensure fresh data
-            from queries import get_all_clips_for_species, get_validated_clips
-
-            get_validated_clips.clear()
-            get_all_clips_for_species.clear()  # Clear the new cached function
 
             st.success("✅ Thank you for your time and effort!")
             st.rerun()

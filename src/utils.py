@@ -1,19 +1,66 @@
+import os
+import tempfile
+from pathlib import Path
+import boto3
+from botocore.client import Config
+
 import librosa
 import pandas as pd
 import streamlit as st
 
-from config import BIRDNET_MULTILINGUAL_PATH, DATA_PATH, VALIDATION_RESPONSES_PATH
+from config import (
+    BIRDNET_MULTILINGUAL_PATH,
+    S3_BASE_URL,
+    S3_ACCESS_KEY_ID,
+    S3_SECRET_ACCESS_KEY,
+    S3_ENDPOINT,
+    VALIDATION_RESPONSES_PATH,
+)
 
 
-def extract_clip(audio_file_path, start_time, sr=48000):
-    audio_data, _ = librosa.load(audio_file_path, sr=sr, mono=True)
-    start_sample = int(start_time * sr)
-    end_sample = int((start_time + 3) * sr)
-    return audio_data[start_sample:end_sample]
+def extract_clip(s3_url, start_time, sr=48000):
+    """Extract a 3-second audio clip from S3 file."""
+    
+    if s3_url is None:
+        st.error("Could not find audio file in S3")
+        return None
+    
+    # Configure boto3 for S3 access
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=f'https://{S3_ENDPOINT}',
+        aws_access_key_id=S3_ACCESS_KEY_ID,
+        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+        config=Config(signature_version='s3v4')
+    )
+    
+    # Parse S3 URL to get bucket and key
+    # s3://bucket/path/to/file.wav -> bucket='bucket', key='path/to/file.wav'
+    s3_parts = s3_url.replace('s3://', '').split('/', 1)
+    bucket = s3_parts[0]
+    key = s3_parts[1] if len(s3_parts) > 1 else ''
+    
+    # Create temporary file to download audio
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+        try:
+            # Download file from S3
+            s3_client.download_file(bucket, key, temp_file.name)
+            
+            # Load and extract clip using librosa
+            audio_data, _ = librosa.load(temp_file.name, sr=sr, mono=True)
+            start_sample = int(start_time * sr)
+            end_sample = int((start_time + 3) * sr)
+            clip = audio_data[start_sample:end_sample]
+            
+            return clip
+            
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_file.name)
 
 
 def get_single_file_path(filename, country, deployment_id):
-    """Get the full path for a single audio file."""
+    """Get the S3 URL for a single audio file by searching the S3 structure efficiently."""
     if country == "France":
         suffix = "_FR"
     elif country == "Spain":
@@ -23,20 +70,74 @@ def get_single_file_path(filename, country, deployment_id):
     elif country == "Norway":
         suffix = ""
 
-    deviceID = deployment_id.split("_")[-1]
-    proj_path = DATA_PATH / f"proj_tabmon_NINA{suffix}"
-
-    if proj_path.exists():
-        device_dirs = list(proj_path.glob(f"bugg_RPiID-*{deviceID}"))
-        if device_dirs:
-            device_path = device_dirs[0]
-            possible_files = list(device_path.glob(f"*/{filename}"))
-            if possible_files:
-                return str(possible_files[0])
-    return "File not found"
+    # Configure boto3 for S3 access
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=f'https://{S3_ENDPOINT}',
+        aws_access_key_id=S3_ACCESS_KEY_ID,
+        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+        config=Config(signature_version='s3v4')
+    )
+    
+    # Extract bucket name from S3_BASE_URL
+    bucket = S3_BASE_URL.replace('s3://', '')
+    
+    # Search efficiently by exploring the directory structure
+    country_prefix = f"proj_tabmon_NINA{suffix}/"
+    
+    try:
+        # First, get all device directories (bugg_RPiID-*)
+        response = s3_client.list_objects_v2(
+            Bucket=bucket,
+            Prefix=country_prefix,
+            Delimiter='/'
+        )
+        
+        if 'CommonPrefixes' not in response:
+            st.warning(f"No device directories found under {country_prefix}")
+            return None
+        
+        # For each device directory, look for conf_ subdirectories
+        for device_prefix in response['CommonPrefixes']:
+            device_path = device_prefix['Prefix']
+            
+            # Get subdirectories under this device (conf_* directories)
+            subdir_response = s3_client.list_objects_v2(
+                Bucket=bucket,
+                Prefix=device_path,
+                Delimiter='/'
+            )
+            
+            if 'CommonPrefixes' not in subdir_response:
+                continue
+                
+            # For each conf_ directory, check if our file exists
+            for conf_prefix in subdir_response['CommonPrefixes']:
+                conf_path = conf_prefix['Prefix']
+                potential_file_key = f"{conf_path}{filename}"
+                
+                # Check if this specific file exists
+                try:
+                    s3_client.head_object(Bucket=bucket, Key=potential_file_key)
+                    #st.success(f"Found file: {potential_file_key}")
+                    return f"s3://{bucket}/{potential_file_key}"
+                except s3_client.exceptions.NoSuchKey:
+                    continue  # File doesn't exist in this location
+                except Exception:
+                    continue  # Other error, keep searching
+        
+    except Exception as e:
+        st.error(f"Error searching for file: {e}")
+        return None
+    
+    st.error(f"Could not find file {filename} in country {country}")
+    return None
 
 
 def save_validation_response(validation_data):
+    # Ensure directory exists
+    VALIDATION_RESPONSES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
     validation_df = pd.DataFrame([validation_data])
 
     if VALIDATION_RESPONSES_PATH.exists():
@@ -75,8 +176,12 @@ def get_validated_clips(country, device_id, species):
         return set()
 
 
-def match_device_id_to_site(site_info_path):
-    site_info_df = pd.read_csv(site_info_path)
+def match_device_id_to_site(site_info_s3_path):
+    # Use DuckDB to read from S3 instead of pandas directly
+    from queries import get_duckdb_connection
+    
+    conn = get_duckdb_connection()
+    site_info_df = conn.execute(f"SELECT * FROM '{site_info_s3_path}'").df()
 
     device_site_map = {}
     for _, row in site_info_df.iterrows():

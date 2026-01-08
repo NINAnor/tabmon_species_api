@@ -1,25 +1,44 @@
 import duckdb
 import streamlit as st
 
-from config import PARQUET_DATASET, SITE_INFO_PATH
+from config import (
+    PARQUET_DATASET,
+    SITE_INFO_S3_PATH,
+    S3_ENDPOINT,
+    S3_ACCESS_KEY_ID,
+    S3_SECRET_ACCESS_KEY,
+)
 from utils import get_validated_clips
 
 
 @st.cache_resource
 def get_duckdb_connection():
-    return duckdb.connect()
+    conn = duckdb.connect()
+    
+    conn.execute("INSTALL httpfs;")
+    conn.execute("LOAD httpfs;")
+
+    # Use SET statements instead of CREATE SECRET for better custom endpoint support
+    conn.execute(f"SET s3_region='us-east-1';")  # Use a standard region
+    conn.execute(f"SET s3_access_key_id='{S3_ACCESS_KEY_ID}';")
+    conn.execute(f"SET s3_secret_access_key='{S3_SECRET_ACCESS_KEY}';")
+    conn.execute(f"SET s3_endpoint='{S3_ENDPOINT}';")
+    conn.execute(f"SET s3_use_ssl=true;") # tells DuckDB to use HTTPS instead of HTTP when making S3 requests
+    conn.execute(f"SET s3_url_style='path';") # controls the URL format DuckDB uses for S3 requests
+    
+    return conn
 
 
 @st.cache_data
 def load_site_info():
     conn = get_duckdb_connection()
-    return conn.execute(f"SELECT * FROM '{SITE_INFO_PATH}'").df()
+    return conn.execute(f"SELECT * FROM '{SITE_INFO_S3_PATH}'").df() 
 
 
 @st.cache_data
 def get_available_countries():
     conn = get_duckdb_connection()
-    query = f"""
+    query = f"""  
     SELECT DISTINCT country
     FROM '{PARQUET_DATASET}'
     ORDER BY country
@@ -31,7 +50,7 @@ def get_available_countries():
 @st.cache_data
 def get_sites_for_country(country):
     conn = get_duckdb_connection()
-    query = f"""
+    query = f""" 
     SELECT DISTINCT device_id
     FROM '{PARQUET_DATASET}'
     WHERE country = ?
@@ -44,7 +63,7 @@ def get_sites_for_country(country):
 @st.cache_data
 def get_species_for_site(country, device_id):
     conn = get_duckdb_connection()
-    query = f"""
+    query = f"""  
     SELECT "scientific name"
     FROM '{PARQUET_DATASET}'
     WHERE country = ? AND device_id = ?
@@ -58,7 +77,7 @@ def get_species_for_site(country, device_id):
 
 def get_audio_files_for_species(country, device_id, species):
     conn = get_duckdb_connection()
-    query = f"""
+    query = f"""  
     SELECT filename
     FROM '{PARQUET_DATASET}'
     WHERE country = ? AND device_id = ? AND "scientific name" = ?
@@ -74,7 +93,7 @@ def get_all_clips_for_species(country, device_id, species, confidence_threshold=
     Returns tuple of (all_clips_data, total_count) for efficient processing.
     """
     conn = get_duckdb_connection()
-    query = f"""
+    query = f""" 
     SELECT filename, "start time", confidence
     FROM '{PARQUET_DATASET}'
     WHERE country = ? AND device_id = ? AND "scientific name" = ? AND confidence >= ?
@@ -83,54 +102,44 @@ def get_all_clips_for_species(country, device_id, species, confidence_threshold=
     results = conn.execute(
         query, [country, device_id, species, confidence_threshold]
     ).fetchall()
-
-    clips_data = [
-        {"filename": result[0], "start_time": result[1], "confidence": result[2]}
-        for result in results
-    ]
-
+    
+    clips_data = [{
+        "filename": result[0],
+        "start_time": result[1], 
+        "confidence": result[2]
+    } for result in results]
+    
     return clips_data, len(results)
 
 
-def get_random_detection_clip(
-    country, device_id, species, confidence_threshold=0.0, bypass_cache=False
-):
-    """Optimized version that uses cached data and session state for better performance.
-    bypass_cache: If True, forces fresh database query instead of using cached data.
-    """
-    # Get all clips data (bypass cache if requested for immediate fresh data)
-    if bypass_cache:
-        # Force fresh query by temporarily clearing cache
-        get_all_clips_for_species.clear()
-        get_validated_clips.clear()
-
+def get_random_detection_clip(country, device_id, species, confidence_threshold=0.0):
+    """Optimized version that uses cached data and session state for better performance."""
+    # Get all clips data (cached)
     all_clips, total_clips = get_all_clips_for_species(
         country, device_id, species, confidence_threshold
     )
-
+    
     if not all_clips:
         return None
-
+    
     # Get already validated clips
     validated_clips = get_validated_clips(country, device_id, species)
-
+    
     # Filter out validated clips
     unvalidated_clips = [
-        clip
-        for clip in all_clips
+        clip for clip in all_clips
         if (clip["filename"], clip["start_time"]) not in validated_clips
     ]
-
+    
     if not unvalidated_clips:
         return {
             "all_validated": True,
             "total_clips": total_clips,
             "validated_count": len(validated_clips),
         }
-
+    
     import random
-
-    return random.choice(unvalidated_clips)
+    return random.choice(unvalidated_clips)  # noqa: S311
 
 
 def get_remaining_clips_count(country, device_id, species, confidence_threshold):
@@ -139,9 +148,9 @@ def get_remaining_clips_count(country, device_id, species, confidence_threshold)
     _, total_clips = get_all_clips_for_species(
         country, device_id, species, confidence_threshold
     )
-
+    
     # Get validated clips count
     validated_clips = get_validated_clips(country, device_id, species)
     validated_count = len(validated_clips)
-
+    
     return max(0, total_clips - validated_count)
