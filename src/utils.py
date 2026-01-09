@@ -14,7 +14,7 @@ from config import (
     S3_ACCESS_KEY_ID,
     S3_SECRET_ACCESS_KEY,
     S3_ENDPOINT,
-    VALIDATION_RESPONSES_PATH,
+    VALIDATION_RESPONSES_S3_PATH,
 )
 
 
@@ -135,32 +135,57 @@ def get_single_file_path(filename, country, deployment_id):
 
 
 def save_validation_response(validation_data):
-    # Ensure directory exists
-    VALIDATION_RESPONSES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Configure boto3 for S3 access
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=f'https://{S3_ENDPOINT}',
+        aws_access_key_id=S3_ACCESS_KEY_ID,
+        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+        config=Config(signature_version='s3v4')
+    )
+    
+    bucket = S3_BASE_URL.replace('s3://', '')
+    key = 'validation_responses.csv'
     
     validation_df = pd.DataFrame([validation_data])
-
-    if VALIDATION_RESPONSES_PATH.exists():
-        validation_df.to_csv(
-            VALIDATION_RESPONSES_PATH, mode="a", header=False, index=False
-        )
-    else:
-        validation_df.to_csv(
-            VALIDATION_RESPONSES_PATH, mode="w", header=True, index=False
-        )
-
+    
+    try:
+        # Try to read existing file
+        s3_client.head_object(Bucket=bucket, Key=key)
+        
+        # File exists, download it, append data, and re-upload
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False) as temp_file:
+            try:
+                s3_client.download_file(bucket, key, temp_file.name)
+                existing_df = pd.read_csv(temp_file.name)
+                combined_df = pd.concat([existing_df, validation_df], ignore_index=True)
+                combined_df.to_csv(temp_file.name, index=False)
+                s3_client.upload_file(temp_file.name, bucket, key)
+            finally:
+                os.unlink(temp_file.name)
+                
+    except Exception as e:
+        # File doesn't exist or other error, create new one
+        with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False) as temp_file:
+            try:
+                validation_df.to_csv(temp_file.name, index=False)
+                s3_client.upload_file(temp_file.name, bucket, key)
+            finally:
+                os.unlink(temp_file.name)
+    
     get_validated_clips.clear()
-
     return True
 
 
 @st.cache_data(ttl=300)
 def get_validated_clips(country, device_id, species):
-    if not VALIDATION_RESPONSES_PATH.exists():
-        return set()
-
     try:
-        validation_df = pd.read_csv(VALIDATION_RESPONSES_PATH)
+        # Use DuckDB to read from S3 
+        from queries import get_duckdb_connection
+        
+        conn = get_duckdb_connection()
+        validation_df = conn.execute(f"SELECT * FROM '{VALIDATION_RESPONSES_S3_PATH}'").df()
+        
         # Filter for same country, device, and species
         filtered_df = validation_df[
             (validation_df["country"] == country)
@@ -173,6 +198,7 @@ def get_validated_clips(country, device_id, species):
             validated_clips.add((row["filename"], row["start_time"]))
         return validated_clips
     except Exception:
+        # File doesn't exist or other error - return empty set
         return set()
 
 

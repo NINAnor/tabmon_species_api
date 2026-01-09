@@ -13,7 +13,7 @@ PARQUET_DATASET = f"{S3_BASE_URL}/merged_predictions_light/*/*/*.parquet"
 SITE_INFO_S3_PATH = f"{S3_BASE_URL}/site_info.csv"
 
 # Local paths (for files that need to be local)
-VALIDATION_RESPONSES_PATH = Path("/app/data/validation_responses.csv")
+VALIDATION_RESPONSES_S3_PATH = f"{S3_BASE_URL}/validation_responses.csv"
 BIRDNET_MULTILINGUAL_PATH = (
     Path(__file__).parent.parent / "assets" / "birdnet_multilingual.csv"
 )
