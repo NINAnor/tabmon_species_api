@@ -1,20 +1,20 @@
+x-common-deployment: &default-common-deployment
+  # to be used with "<< : *default-common-deployment"
+  deploy:
+    replicas: 1
+    restart_policy:
+      condition: on-failure
+      delay: 60s
+      max_attempts: 3
+
 services:
-  api-dashboard:
+  listening-lab:
+    <<: *default-common-deployment
     build:
       context: .
-    environment:
-      RCLONE_CONFIG: /run/secrets/tabmon_rclone
-    secrets:
-      - tabmon_rclone
-    privileged: true
-    devices:
-      - /dev/fuse:/dev/fuse
-    cap_add:
-      - SYS_ADMIN
+    env_file:
+      - ".env"
     ports:
       - "8501:8501"
 
-secrets:
-  tabmon_rclone:
-    #external: true
-    file: ~/.config/rclone/rclone.conf
+
