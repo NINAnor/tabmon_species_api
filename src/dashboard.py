@@ -32,12 +32,14 @@ def setup_page_config():
 def render_page_header():
     st.title("🐦 TABMON Listening Lab", text_alignment="center")
 
-    st.markdown("### Welcome to the TABMON Species Validation Tool! 🎧", text_alignment="center")
+    st.markdown(
+        "### Welcome to the TABMON Species Validation Tool! 🎧", text_alignment="center"
+    )
     st.markdown(
         "Help us improve bird species detection by listening to audio clips and "
         "confirming what you hear. "
         "Please wait a minute or two for the application to initialize!"
-        " **If you want more information about this project, check out our**" 
+        " **If you want more information about this project, check out our**"
         " **[website](https://tabmon-eu.nina.no/) and our [dashboard](https://tabmon.nina.no/).**",
         text_alignment="center",
     )
@@ -220,7 +222,6 @@ def render_validation_form(result, selections):
             st.success("🎉 All clips validated for these parameters!")
 
         with st.form("validation_form"):
-
             st.markdown(f"#### Is this detection a {selections['species_display']}?")
 
             validation_response = st.radio(
@@ -235,7 +236,7 @@ def render_validation_form(result, selections):
             user_validation = st.text_input(
                 "**If no, What did you detect instead?**",
                 placeholder="e.g., different species, noise, silence, etc.",
-                help="Please describe what you actually heard in this audio clip"
+                help="Please describe what you actually heard in this audio clip",
             )
 
             user_confidence = st.radio(
