@@ -47,8 +47,8 @@ def extract_clip(s3_url, start_time, sr=48000):
 
             # Load and extract clip using librosa
             audio_data, _ = librosa.load(temp_file.name, sr=sr, mono=True)
-            start_sample = int(start_time * sr)
-            end_sample = int((start_time + 3) * sr)
+            start_sample = int((start_time - 3) * sr)
+            end_sample = int((start_time + 6) * sr)
             clip = audio_data[start_sample:end_sample]
 
             return clip
