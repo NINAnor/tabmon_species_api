@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -198,23 +197,21 @@ def render_clip_section(result, selections):
             )
 
         st.audio(clip, format="audio/wav", sample_rate=48000)
-        
+
         # Display spectrogram
         st.markdown("**📊 Spectrogram:**")
         fig, ax = plt.subplots(figsize=(10, 4))
-        D = np.abs(np.fft.rfft(clip))
-        freqs = np.fft.rfftfreq(len(clip), 1/48000)
-        
-        # Create spectrogram using matplotlib specgram
-        Pxx, freqs, bins, im = ax.specgram(clip, Fs=48000, NFFT=1024, 
-                                            noverlap=512, cmap='viridis')
-        ax.set_ylabel('Frequency (Hz)')
-        ax.set_xlabel('Time (s)')
+
+        Pxx, freqs, bins, im = ax.specgram(
+            clip, Fs=48000, NFFT=1024, noverlap=512, cmap="viridis"
+        )
+        ax.set_ylabel("Frequency (Hz)")
+        ax.set_xlabel("Time (s)")
         ax.set_ylim(0, 12000)  # Focus on bird call frequencies
-        plt.colorbar(im, ax=ax, label='relative Intensity (dB)')
+        plt.colorbar(im, ax=ax, label="relative Intensity (dB)")
         st.pyplot(fig)
         plt.close()
-        
+
         render_load_new_button()
 
     return True
