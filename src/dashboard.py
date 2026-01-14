@@ -106,14 +106,14 @@ def get_user_selections():
         species_display_map = get_species_display_names(detected_species, language_code)
 
     display_names = list(species_display_map.keys())
-    
+
     # Determine default species index - maintain selection across reruns
     default_index = 0
-    
+
     # If we have a previously selected species, try to find its index
     if "selected_species_display" in st.session_state:
         default_index = display_names.index(st.session_state.selected_species_display)
-    
+
     # Only do random selection on very first load
     if "species_initialized" not in st.session_state:
         available_common = [s for s in COMMON_SPECIES if s in detected_species]
@@ -129,7 +129,7 @@ def get_user_selections():
         "Select Species", display_names, index=default_index
     )
     selected_species = species_display_map[selected_species_display]
-    
+
     # Store the selected species display name for next rerun
     st.session_state.selected_species_display = selected_species_display
 
@@ -239,7 +239,12 @@ def render_clip_section(result, selections):
             fig, ax = plt.subplots(figsize=(10, 4))
 
             Pxx, freqs, bins, im = ax.specgram(
-                clip, Fs=48000, NFFT=1024, noverlap=512, cmap="viridis"
+                clip,
+                Fs=48000,
+                NFFT=1024,
+                noverlap=512,
+                cmap="viridis",
+                vmin=-120,  # Higher minimum dB for better dynamic range
             )
             ax.set_ylabel("Frequency (Hz)")
             ax.set_xlabel("Time (s)")
@@ -386,11 +391,9 @@ def main():
 
     setup_page_config()
     render_page_header()
+    render_help_section()
 
     selections = get_user_selections()
-
-    # Help section (collapsed by default)
-    render_help_section()
 
     st.markdown("---")
 
