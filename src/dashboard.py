@@ -110,9 +110,20 @@ def get_user_selections():
     # Determine default species index - maintain selection across reruns
     default_index = 0
 
-    # If we have a previously selected species, try to find its index
+    # Clean up old session state variable if it exists
     if "selected_species_display" in st.session_state:
-        default_index = display_names.index(st.session_state.selected_species_display)
+        del st.session_state.selected_species_display
+
+    # If we have a previously selected species (stored as scientific name), find it
+    if "selected_species_scientific" in st.session_state:
+        # Find the display name for this scientific name
+        for i, display_name in enumerate(display_names):
+            if (
+                species_display_map[display_name]
+                == st.session_state.selected_species_scientific
+            ):
+                default_index = i
+                break
 
     # Only do random selection on very first load
     if "species_initialized" not in st.session_state:
@@ -130,8 +141,8 @@ def get_user_selections():
     )
     selected_species = species_display_map[selected_species_display]
 
-    # Store the selected species display name for next rerun
-    st.session_state.selected_species_display = selected_species_display
+    # Store the scientific name (not display name) for next rerun
+    st.session_state.selected_species_scientific = selected_species
 
     # Confidence threshold
     confidence_threshold = st.sidebar.slider(

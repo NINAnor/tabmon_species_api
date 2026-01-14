@@ -24,4 +24,5 @@ LANGUAGE_MAPPING = {
     "Spanish": "es",
     "Dutch": "nl",
     "Norwegian": "no",
+    "French": "fr",
 }
