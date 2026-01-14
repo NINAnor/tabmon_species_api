@@ -42,7 +42,8 @@ def render_page_header():
         "confirming what you hear. "
         "Please wait a minute or two for the application to initialize!"
         " **If you want more information about this project, check out our**"
-        " **[website](https://tabmon-eu.nina.no/) and our [dashboard](https://tabmon.nina.no/).**",
+        " **[website](https://tabmon-eu.nina.no/), our [dashboard](https://tabmon.nina.no/),"
+        " and the [GitHub repository](https://github.com/NINAnor/tabmon_species_api).**",
         text_alignment="center",
     )
 
