@@ -105,23 +105,33 @@ def get_user_selections():
         language_code = LANGUAGE_MAPPING[selected_language]
         species_display_map = get_species_display_names(detected_species, language_code)
 
-    # Determine default species index
+    display_names = list(species_display_map.keys())
+    
+    # Determine default species index - maintain selection across reruns
     default_index = 0
+    
+    # If we have a previously selected species, try to find its index
+    if "selected_species_display" in st.session_state:
+        default_index = display_names.index(st.session_state.selected_species_display)
+    
+    # Only do random selection on very first load
     if "species_initialized" not in st.session_state:
-        random_species = random.choice(
-            [s for s in COMMON_SPECIES if s in detected_species]
-        )
-        display_names = list(species_display_map.keys())
-        for i, display_name in enumerate(display_names):
-            if species_display_map[display_name] == random_species:
-                default_index = i
-                break
+        available_common = [s for s in COMMON_SPECIES if s in detected_species]
+        if available_common:
+            random_species = random.choice(available_common)
+            for i, display_name in enumerate(display_names):
+                if species_display_map[display_name] == random_species:
+                    default_index = i
+                    break
         st.session_state.species_initialized = True
 
     selected_species_display = st.sidebar.selectbox(
-        "Select Species", list(species_display_map.keys()), index=default_index
+        "Select Species", display_names, index=default_index
     )
     selected_species = species_display_map[selected_species_display]
+    
+    # Store the selected species display name for next rerun
+    st.session_state.selected_species_display = selected_species_display
 
     # Confidence threshold
     confidence_threshold = st.sidebar.slider(
