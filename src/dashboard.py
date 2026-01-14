@@ -1,3 +1,4 @@
+import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -53,6 +54,18 @@ def render_sidebar_logo():
         st.sidebar.markdown("---")
 
 
+# Common species that are present across most habitats
+COMMON_SPECIES = [
+    "Corvus corone",
+    "Columba palumbus",
+    "Erithacus rubecula",
+    "Turdus merula",
+    "Cygnus olor",
+    "Branta canadensis",
+    "Cuculus canorus",
+]
+
+
 def get_user_selections():
     render_sidebar_logo()
     st.sidebar.header("🔍 Select the parameters")
@@ -92,8 +105,21 @@ def get_user_selections():
         language_code = LANGUAGE_MAPPING[selected_language]
         species_display_map = get_species_display_names(detected_species, language_code)
 
+    # Determine default species index
+    default_index = 0
+    if "species_initialized" not in st.session_state:
+        random_species = random.choice(
+            [s for s in COMMON_SPECIES if s in detected_species]
+        )
+        display_names = list(species_display_map.keys())
+        for i, display_name in enumerate(display_names):
+            if species_display_map[display_name] == random_species:
+                default_index = i
+                break
+        st.session_state.species_initialized = True
+
     selected_species_display = st.sidebar.selectbox(
-        "Select Species", list(species_display_map.keys())
+        "Select Species", list(species_display_map.keys()), index=default_index
     )
     selected_species = species_display_map[selected_species_display]
 
@@ -239,13 +265,14 @@ def render_validation_form(result, selections):
 
         with st.form("validation_form"):
             st.markdown(f"#### Is this detection a {selections['species_display']}?")
-            
+
             # Add Wikipedia link for the species
-            species_wiki_name = selections['species'].replace(' ', '_')
+            species_wiki_name = selections["species"].replace(" ", "_")
+            wiki_url = f"https://en.wikipedia.org/wiki/{species_wiki_name}"
             st.markdown(
-                f"ℹ️ Learn more: [Wikipedia page for {selections['species']}]"
-                f"(https://en.wikipedia.org/wiki/{species_wiki_name})",
-                unsafe_allow_html=True
+                f"ℹ️ Learn more about this species: "
+                f"[Wikipedia page for {selections['species']}]({wiki_url})",
+                unsafe_allow_html=True,
             )
 
             validation_response = st.radio(
