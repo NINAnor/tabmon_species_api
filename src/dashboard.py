@@ -239,6 +239,14 @@ def render_validation_form(result, selections):
 
         with st.form("validation_form"):
             st.markdown(f"#### Is this detection a {selections['species_display']}?")
+            
+            # Add Wikipedia link for the species
+            species_wiki_name = selections['species'].replace(' ', '_')
+            st.markdown(
+                f"ℹ️ Learn more: [Wikipedia page for {selections['species']}]"
+                f"(https://en.wikipedia.org/wiki/{species_wiki_name})",
+                unsafe_allow_html=True
+            )
 
             validation_response = st.radio(
                 "**Your answer:**",
