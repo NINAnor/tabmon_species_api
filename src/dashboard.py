@@ -325,32 +325,31 @@ def render_validation_form(result, selections):
             st.error("Please answer both questions before submitting.")
 
 
-@st.cache_data
-def render_explanations_section():
-    with st.expander("📖 How to use this tool", expanded=True):
-        st.markdown("""
-        **Simple 4-step process:**
-        1. **Select your preferences** in the sidebar (country, location, species,
-           language for the name of the species)
-        2. **Listen** to the 3-second audio clip that appears
-        3. **Answer** whether you hear the selected species or not
-        4. **Rate your confidence** in your answer and submit
+def render_help_section():
+    """Render help information in a collapsible section."""
+    with st.expander("ℹ️ Help & Instructions", expanded=False):
+        st.markdown("""### 📖 How to use this tool
 
-        **Your contributions help us:**
-        - ✅ Improve automatic bird detection models
-        - 🎯 Identify which species are harder to detect
-        - 🌍 Build better tools for biodiversity monitoring
-        """)
+**Simple 4-step process:**
+1. **Select your preferences** in the sidebar (you can select the country,
+   location, species, and language for the name of the species)
+2. **Listen** to the 9-second audio clip that appears
+3. **Answer** whether you hear the selected species or not
+4. **Rate your confidence** in your answer and submit!
 
-    with st.expander("⏱️ What to expect", expanded=True):
-        st.markdown("""
-        - **First load:** May take up to a minute as we process the data
-        - **Changing country/location/species:** Takes a few seconds to load new data
-        - **Languages:** Switch freely between scientific and common names
-        """)
+**Your contributions help us:**
+- ✅ Improve automatic bird detection models
+- 🎯 Identify which species are harder to detect
+- 🌍 Build better tools for biodiversity monitoring
+""")
 
+        st.markdown("""### ⏱️ What to expect
 
-st.markdown("---")
+- **First load:** May take up to a minute as we process the data
+- **Changing country/location/species:** Takes a few seconds to load new data
+- **Languages:** Switch freely between scientific and common names in your
+  language of preference!
+""")
 
 
 def render_load_new_button():
@@ -380,17 +379,20 @@ def main():
 
     selections = get_user_selections()
 
+    # Help section (collapsed by default)
+    render_help_section()
+
+    st.markdown("---")
+
+    # Main content: Audio Clip and Validation side by side
+    result = get_or_load_clip(selections)
+
     col1, col2 = st.columns([1, 1])
 
     with col1:
-        render_explanations_section()
-
-    with col2:
-        result = get_or_load_clip(selections)
         clip_loaded = render_clip_section(result, selections)
 
-        st.markdown("")
-
+    with col2:
         if result and not result.get("all_validated") and clip_loaded:
             render_validation_form(result, selections)
         else:
