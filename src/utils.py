@@ -13,7 +13,6 @@ from config import (
     S3_BASE_URL,
     S3_ENDPOINT,
     S3_SECRET_ACCESS_KEY,
-    VALIDATION_RESPONSES_S3_PATH,
 )
 
 
@@ -130,6 +129,9 @@ def get_single_file_path(filename, country, deployment_id):
 
 
 def save_validation_response(validation_data):
+    """Save validation to session-specific file to avoid concurrent write issues."""
+    session_id = st.session_state.session_id
+
     # Configure boto3 for S3 access
     s3_client = boto3.client(
         "s3",
@@ -140,52 +142,93 @@ def save_validation_response(validation_data):
     )
 
     bucket = S3_BASE_URL.replace("s3://", "")
-    key = "validation_responses.csv"
+
+    # Use session ID as filename: validations/session_{session_id}.csv
+    key = f"validations/session_{session_id}.csv"
 
     validation_df = pd.DataFrame([validation_data])
 
     try:
-        # Try to read existing file
-        s3_client.head_object(Bucket=bucket, Key=key)
+        # Try to append to existing session file
+        try:
+            s3_client.head_object(Bucket=bucket, Key=key)
 
-        # File exists, download it, append data, and re-upload
-        with tempfile.NamedTemporaryFile(
-            mode="w+", suffix=".csv", delete=False
-        ) as temp_file:
-            try:
-                s3_client.download_file(bucket, key, temp_file.name)
-                existing_df = pd.read_csv(temp_file.name)
-                combined_df = pd.concat([existing_df, validation_df], ignore_index=True)
-                combined_df.to_csv(temp_file.name, index=False)
-                s3_client.upload_file(temp_file.name, bucket, key)
-            finally:
-                Path(temp_file.name).unlink()
+            # File exists, download it, append, and re-upload
+            with tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".csv", delete=False
+            ) as temp_file:
+                try:
+                    s3_client.download_file(bucket, key, temp_file.name)
+                    existing_df = pd.read_csv(temp_file.name)
+                    combined_df = pd.concat(
+                        [existing_df, validation_df], ignore_index=True
+                    )
+                    combined_df.to_csv(temp_file.name, index=False)
+                    s3_client.upload_file(temp_file.name, bucket, key)
+                finally:
+                    Path(temp_file.name).unlink()
+        except Exception:
+            # File doesn't exist yet, create new one
+            with tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".csv", delete=False
+            ) as temp_file:
+                try:
+                    validation_df.to_csv(temp_file.name, index=False)
+                    s3_client.upload_file(temp_file.name, bucket, key)
+                finally:
+                    Path(temp_file.name).unlink()
 
-    except Exception:
-        # File doesn't exist or other error, create new one
-        with tempfile.NamedTemporaryFile(
-            mode="w+", suffix=".csv", delete=False
-        ) as temp_file:
-            try:
-                validation_df.to_csv(temp_file.name, index=False)
-                s3_client.upload_file(temp_file.name, bucket, key)
-            finally:
-                Path(temp_file.name).unlink()
-
-    get_validated_clips.clear()
-    return True
+        get_validated_clips.clear()
+        return True
+    except Exception as e:
+        st.error(f"Error saving validation: {e}")
+        return False
 
 
 @st.cache_data(ttl=300)
 def get_validated_clips(country, device_id, species):
+    """Read all validation files from S3 and return validated clips set."""
     try:
-        # Use DuckDB to read from S3
-        from queries import get_duckdb_connection
+        # Configure boto3 for S3 access
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{S3_ENDPOINT}",
+            aws_access_key_id=S3_ACCESS_KEY_ID,
+            aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+            config=Config(signature_version="s3v4"),
+        )
 
-        conn = get_duckdb_connection()
-        validation_df = conn.execute(
-            f"SELECT * FROM '{VALIDATION_RESPONSES_S3_PATH}'"
-        ).df()
+        bucket = S3_BASE_URL.replace("s3://", "")
+        prefix = "validations/"
+
+        # List all validation files
+        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+
+        if "Contents" not in response:
+            return set()  # No validation files yet
+
+        # Read and combine all validation files
+        all_validations = []
+        for obj in response["Contents"]:
+            if obj["Key"].endswith(".csv"):
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w+", suffix=".csv", delete=False
+                    ) as temp_file:
+                        try:
+                            s3_client.download_file(bucket, obj["Key"], temp_file.name)
+                            df = pd.read_csv(temp_file.name)
+                            all_validations.append(df)
+                        finally:
+                            Path(temp_file.name).unlink()
+                except Exception:  # noqa: S112
+                    continue  # Skip corrupted files
+
+        if not all_validations:
+            return set()
+
+        # Combine all validation dataframes
+        validation_df = pd.concat(all_validations, ignore_index=True)
 
         # Filter for same country, device, and species
         filtered_df = validation_df[
@@ -193,13 +236,14 @@ def get_validated_clips(country, device_id, species):
             & (validation_df["device_id"] == device_id)
             & (validation_df["species"] == species)
         ]
+
         # Return set of filename + start_time combinations that have been validated
         validated_clips = set()
         for _, row in filtered_df.iterrows():
             validated_clips.add((row["filename"], row["start_time"]))
         return validated_clips
     except Exception:
-        # File doesn't exist or other error - return empty set
+        # Error reading validations - return empty set
         return set()
 
 
