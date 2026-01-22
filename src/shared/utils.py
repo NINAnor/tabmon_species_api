@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 from botocore.client import Config
 
-from config import (
+from shared.config import (
     BIRDNET_MULTILINGUAL_PATH,
     S3_ACCESS_KEY_ID,
     S3_BASE_URL,
@@ -130,6 +130,8 @@ def get_single_file_path(filename, country, deployment_id):
 
 def save_validation_response(validation_data):
     """Save validation to session-specific file to avoid concurrent write issues."""
+    from shared.config import NORMAL_VALIDATIONS_PREFIX
+    
     session_id = st.session_state.session_id
 
     # Configure boto3 for S3 access
@@ -144,7 +146,7 @@ def save_validation_response(validation_data):
     bucket = S3_BASE_URL.replace("s3://", "")
 
     # Use session ID as filename: validations/session_{session_id}.csv
-    key = f"validations/session_{session_id}.csv"
+    key = f"{NORMAL_VALIDATIONS_PREFIX}/session_{session_id}.csv"
 
     validation_df = pd.DataFrame([validation_data])
 
@@ -188,6 +190,8 @@ def save_validation_response(validation_data):
 @st.cache_data(ttl=300)
 def get_validated_clips(country, device_id, species):
     """Read all validation files from S3 and return validated clips set."""
+    from shared.config import NORMAL_VALIDATIONS_PREFIX
+    
     try:
         # Configure boto3 for S3 access
         s3_client = boto3.client(
@@ -199,10 +203,11 @@ def get_validated_clips(country, device_id, species):
         )
 
         bucket = S3_BASE_URL.replace("s3://", "")
-        prefix = "validations/"
 
-        # List all validation files
-        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        # List all validation files in the normal validation prefix
+        response = s3_client.list_objects_v2(
+            Bucket=bucket, Prefix=f"{NORMAL_VALIDATIONS_PREFIX}/"
+        )
 
         if "Contents" not in response:
             return set()  # No validation files yet
@@ -249,7 +254,7 @@ def get_validated_clips(country, device_id, species):
 
 def match_device_id_to_site(site_info_s3_path):
     # Use DuckDB to read from S3 instead of pandas directly
-    from queries import get_duckdb_connection
+    from shared.queries import get_duckdb_connection
 
     conn = get_duckdb_connection()
     site_info_df = conn.execute(f"SELECT * FROM '{site_info_s3_path}'").df()
@@ -299,7 +304,7 @@ def save_pro_validation_response(validation_data):
     Save Pro mode validation to session-specific file.
     Pro validations include multiple species in a list format.
     """
-    from pro_config import PRO_S3_BUCKET
+    from shared.config import PRO_VALIDATIONS_PREFIX, S3_BUCKET
     
     session_id = st.session_state.session_id
 
@@ -312,10 +317,10 @@ def save_pro_validation_response(validation_data):
         config=Config(signature_version="s3v4"),
     )
 
-    bucket = PRO_S3_BUCKET
+    bucket = S3_BUCKET
 
-    # Use session ID as filename: pro_validations/session_{session_id}.csv
-    key = f"pro_validations/session_{session_id}.csv"
+    # Use session ID as filename: validations_pro/session_{session_id}.csv
+    key = f"{PRO_VALIDATIONS_PREFIX}/session_{session_id}.csv"
 
     # Convert list of species to JSON string for CSV storage
     validation_data_copy = validation_data.copy()
@@ -371,7 +376,7 @@ def load_pro_validation_responses():
     Returns:
         DataFrame with all Pro validations or None if no data
     """
-    from pro_config import PRO_S3_BUCKET
+    from shared.config import PRO_VALIDATIONS_PREFIX, S3_BUCKET
     
     try:
         # Configure boto3 for S3 access
@@ -383,10 +388,12 @@ def load_pro_validation_responses():
             config=Config(signature_version="s3v4"),
         )
 
-        bucket = PRO_S3_BUCKET
+        bucket = S3_BUCKET
 
         # List all validation files
-        response = s3_client.list_objects_v2(Bucket=bucket, Prefix="pro_validations/")
+        response = s3_client.list_objects_v2(
+            Bucket=bucket, Prefix=f"{PRO_VALIDATIONS_PREFIX}/"
+        )
 
         if "Contents" not in response:
             return None

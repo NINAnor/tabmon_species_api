@@ -1,14 +1,14 @@
 import duckdb
 import streamlit as st
 
-from config import (
-    PARQUET_DATASET,
+from shared.config import (
+    NORMAL_PARQUET_DATASET,
     S3_ACCESS_KEY_ID,
     S3_ENDPOINT,
     S3_SECRET_ACCESS_KEY,
     SITE_INFO_S3_PATH,
 )
-from utils import get_validated_clips
+from shared.utils import get_validated_clips
 
 
 @st.cache_resource
@@ -44,7 +44,7 @@ def get_available_countries():
     conn = get_duckdb_connection()
     query = f"""
     SELECT DISTINCT country
-    FROM '{PARQUET_DATASET}'
+    FROM '{NORMAL_PARQUET_DATASET}'
     ORDER BY country
     """
     result = conn.execute(query).fetchall()
@@ -56,7 +56,7 @@ def get_sites_for_country(country):
     conn = get_duckdb_connection()
     query = f"""
     SELECT DISTINCT device_id
-    FROM '{PARQUET_DATASET}'
+    FROM '{NORMAL_PARQUET_DATASET}'
     WHERE country = ?
     ORDER BY device_id
     """
@@ -69,7 +69,7 @@ def get_species_for_site(country, device_id):
     conn = get_duckdb_connection()
     query = f"""
     SELECT "scientific name"
-    FROM '{PARQUET_DATASET}'
+    FROM '{NORMAL_PARQUET_DATASET}'
     WHERE country = ? AND device_id = ?
     GROUP BY "scientific name"
     HAVING COUNT(*) >= 5
@@ -83,7 +83,7 @@ def get_audio_files_for_species(country, device_id, species):
     conn = get_duckdb_connection()
     query = f"""
     SELECT filename
-    FROM '{PARQUET_DATASET}'
+    FROM '{NORMAL_PARQUET_DATASET}'
     WHERE country = ? AND device_id = ? AND "scientific name" = ?
     LIMIT 10
     """

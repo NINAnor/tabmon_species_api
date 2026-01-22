@@ -1,10 +1,21 @@
 # TABMON Listening Lab
 
-This repository contains the source code for the TABMON Listening Lab, an interactive web application designed have users help us annotate the acoustic data collected by the [TABMON project](https://tabmon-eu.nina.no/).
+This repository contains the source code for the TABMON Listening Lab, an interactive web application designed to help users annotate acoustic data collected by the [TABMON project](https://tabmon-eu.nina.no/).
+
+## Features
+
+The application supports **two modes**:
+
+### 🎵 Normal Mode
+- Open access for all users
+- Random clip selection and validation
+- Simple Yes/No/Unsure validation
+- Country → Site → Species selection
+- Perfect for crowd-sourced validation
 
 ## How it works
 
-The TABMON Listening Lab connects to an S3 storage that hosts the audio data and the results from the AI models used to classify the bird songs. The audio data is presented to the users in the form of short audio clips (3 seconds) along with the AI model predictions. The users can listen to the audio clips and provide their annotations regarding the presence of bird species.
+The TABMON Listening Lab connects to an S3 storage that hosts the audio data and the results from the AI models used to classify the bird songs. The audio data is presented to the users in the form of short audio clips (3 seconds) along with the AI model predictions. Users can listen to the audio clips and provide their annotations regarding the presence of bird species.
 
 ### Architecture
 

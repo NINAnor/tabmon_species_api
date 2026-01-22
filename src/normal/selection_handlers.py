@@ -1,21 +1,20 @@
 """
 Selection Handlers for the TABMON Listening Lab dashboard.
 
-This module manages user input selections including country, site, species,
-language, and confidence threshold selections in the sidebar.
+This module manages user input selections for normal mode.
 """
 
 import random
-
 import streamlit as st
 
-from config import LANGUAGE_MAPPING, SITE_INFO_S3_PATH
-from queries import (
+from shared.config import LANGUAGE_MAPPING, SITE_INFO_S3_PATH
+from shared.queries import (
     get_available_countries,
     get_sites_for_country,
     get_species_for_site,
 )
-from utils import get_species_display_names, match_device_id_to_site
+from shared.utils import get_species_display_names, match_device_id_to_site
+from shared.ui_utils import render_sidebar_logo
 
 
 # Common species that are present across most habitats
@@ -35,17 +34,8 @@ def get_user_selections():
     Render sidebar controls and collect user selections.
     
     Returns:
-        Dictionary containing all user selections:
-        - language: Selected language for species names
-        - country: Selected country
-        - site_name: Human-readable site name
-        - device: Device ID for the selected site
-        - species: Scientific name of selected species
-        - species_display: Display name of selected species (in chosen language)
-        - confidence_threshold: Minimum confidence threshold
+        Dictionary containing all user selections
     """
-    from ui_components import render_sidebar_logo
-    
     render_sidebar_logo()
     st.sidebar.header("🔍 Select the parameters")
 

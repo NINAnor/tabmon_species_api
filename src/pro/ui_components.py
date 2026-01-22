@@ -1,0 +1,154 @@
+"""
+Pro Mode UI Components
+
+This module contains UI components specific to Pro mode.
+"""
+
+import os
+import streamlit as st
+
+from shared.ui_utils import (
+    render_sidebar_logo,
+    render_spectrogram,
+    render_audio_player,
+    render_clip_metadata,
+    render_all_validated_message,
+    clear_cache_functions,
+)
+
+
+def render_pro_page_header():
+    """Render the Pro mode page header."""
+    st.title("🎓 TABMON Listening Lab - Pro Mode", text_alignment="center")
+
+    st.markdown(
+        "### Professional Species Annotation Tool", text_alignment="center"
+    )
+    st.markdown(
+        "Welcome to the Pro annotation mode. You have been assigned specific clips "
+        "to annotate with detailed species identification. "
+        "Please carefully listen to each clip and select all species you can identify.",
+        text_alignment="center",
+    )
+
+
+def render_pro_help_section():
+    """Render Pro mode help information."""
+    with st.expander("ℹ️ Pro Mode Instructions", expanded=False):
+        st.markdown("""### 📖 How to use Pro Mode
+
+**Annotation Process:**
+1. **Login** with your assigned User ID
+2. **Listen** to the assigned audio clip
+3. **Select all species** you can identify from the checklist
+4. **Add additional species** not in the list if needed
+5. **Rate your confidence** and audio quality
+6. **Submit** your annotations
+
+**Key Differences from Normal Mode:**
+- ✅ You work on **assigned clips** specific to your user ID
+- ✅ **Multi-species identification** using checklists
+- ✅ More detailed **quality assessment**
+- ✅ Progress tracking for your assignments
+
+**Tips for Better Annotations:**
+- 🎧 Use good quality headphones
+- 🔊 Listen to the entire clip, sometimes multiple times
+- 🔍 Check the spectrogram for visual confirmation
+- 📝 Add notes about uncertainties or background noise
+- ⚠️ Be conservative - only select species you're confident about
+""")
+
+        st.markdown("""### 🎯 Quality Guidelines
+
+**High Confidence:** Clear vocalization, easily identifiable
+**Moderate Confidence:** Recognizable but with some uncertainty
+**Low Confidence:** Difficult to identify, background noise, or distant calls
+
+**Audio Quality:**
+- **Excellent:** Crystal clear, no interference
+- **Good:** Clear with minor background noise
+- **Fair:** Audible but with noticeable interference
+- **Poor:** Difficult to hear, heavy interference
+""")
+
+
+def render_pro_clip_section(result, selections):
+    """
+    Render the Pro mode audio clip section.
+    
+    Args:
+        result: Dictionary containing clip information
+        selections: Dictionary containing user selections
+        
+    Returns:
+        bool: True if clip was loaded successfully, False otherwise
+    """
+    from shared.utils import extract_clip, get_single_file_path
+
+    if not result:
+        st.warning(f"No clips assigned for user {selections['user_id']}")
+        return False
+
+    # Check if all clips have been validated
+    if result.get("all_validated"):
+        render_all_validated_message(
+            mode_name="assigned clips",
+            total_clips=result['total_clips'],
+            extra_message="Your annotation work is complete. Thank you for your contribution!"
+        )
+        return False
+
+    with st.container(border=True):
+        st.markdown("### 🎵 Audio Clip")
+
+        with st.spinner("Loading audio clip..."):
+            filepath = result['filename'].replace('bugg_RpiID', 'bugg_RPiID')
+            full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
+            clip = extract_clip(full_path, result["start_time"])
+
+        # Show number of species detected
+        render_clip_metadata(
+            result["filename"].split("/")[-1],
+        )
+        render_audio_player(clip)
+        render_spectrogram(clip, expanded=True)
+
+        render_pro_load_new_button()
+
+    return True
+
+
+def render_pro_load_new_button():
+    """Render the load new detection button for Pro mode."""
+    if st.button("🔄 Load Next Clip", help="Get the next assigned clip to annotate"):
+        st.session_state.pro_current_clip = None
+        st.session_state.pro_clip_params = None
+        
+        from pro.queries import (
+            get_validated_pro_clips,
+            get_assigned_clips_for_user,
+            get_remaining_pro_clips_count
+        )
+        clear_cache_functions(
+            get_validated_pro_clips,
+            get_assigned_clips_for_user,
+            get_remaining_pro_clips_count
+        )
+        st.rerun()
+
+
+def render_pro_empty_validation_placeholder():
+    """Render placeholder when no Pro validation form should be shown."""
+    with st.container(border=True):
+        st.markdown("### 🎯 Pro Validation")
+        st.info(
+            "Please login with your User ID to access your assigned clips."
+        )
+
+
+def render_pro_all_validated_placeholder():
+    """Render message when all Pro clips have been validated."""
+    with st.container(border=True):
+        st.markdown("### 🎯 Pro Validation")
+        st.success("🎉 All assigned clips have been annotated! Great work!")

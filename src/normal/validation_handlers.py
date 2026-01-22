@@ -8,8 +8,8 @@ and submission of validation responses.
 import pandas as pd
 import streamlit as st
 
-from queries import get_remaining_clips_count
-from utils import save_validation_response
+from shared.queries import get_remaining_clips_count
+from shared.utils import save_validation_response
 
 
 def render_validation_form(result, selections):
