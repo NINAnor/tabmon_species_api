@@ -79,7 +79,7 @@ def get_top_species_for_database():
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_assigned_clips_for_user(user_id, confidence_threshold=0.0):
+def get_assigned_clips_for_user(user_id):
     """
     Get all assigned clips for a specific userID.
     Returns list of dicts for efficient processing.
@@ -191,19 +191,18 @@ def get_validated_pro_clips(user_id):
         return set()
 
 
-def get_random_assigned_clip(user_id, confidence_threshold=0.0):
+def get_random_assigned_clip(user_id):
     """
     Get a random unvalidated clip assigned to the user.
     
     Args:
         user_id: The user's ID
-        confidence_threshold: Minimum confidence score
         
     Returns:
         dict: Clip information or None if no clips available
         dict with 'all_validated': True if all clips are validated
     """
-    all_clips = get_assigned_clips_for_user(user_id, confidence_threshold)
+    all_clips = get_assigned_clips_for_user(user_id)
     
     if not all_clips:
         return None
@@ -241,9 +240,9 @@ def get_random_assigned_clip(user_id, confidence_threshold=0.0):
 
 
 @st.cache_data
-def get_remaining_pro_clips_count(user_id, confidence_threshold=0.0):
+def get_remaining_pro_clips_count(user_id):
     """Get count of remaining unvalidated clips for user."""
-    all_clips = get_assigned_clips_for_user(user_id, confidence_threshold)
+    all_clips = get_assigned_clips_for_user(user_id)
     validated_clips = get_validated_pro_clips(user_id)
     
     # Count unvalidated clips efficiently

@@ -39,7 +39,7 @@ def get_or_load_pro_clip(selections):
     """
     initialize_pro_session()
     
-    current_params = (selections["user_id"], selections["confidence_threshold"])
+    current_params = (selections["user_id"],)
 
     # If parameters changed, clear and reload
     if check_params_changed('pro_clip_params', current_params):
@@ -50,7 +50,6 @@ def get_or_load_pro_clip(selections):
     if st.session_state.pro_current_clip is None:
         st.session_state.pro_current_clip = get_random_assigned_clip(
             selections["user_id"],
-            selections["confidence_threshold"],
         )
 
     return st.session_state.pro_current_clip

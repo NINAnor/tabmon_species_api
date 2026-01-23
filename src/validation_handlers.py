@@ -27,7 +27,6 @@ def render_pro_validation_form(result, selections, top_species):
         # Show remaining clips count
         remaining_clips = get_remaining_pro_clips_count(
             selections["user_id"],
-            selections["confidence_threshold"],
         )
         if remaining_clips > 0:
             st.info(
@@ -60,24 +59,41 @@ def render_pro_validation_form(result, selections, top_species):
                 uncertainty_list = uncertainty_list.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
                 uncertainty_list = ast.literal_eval(uncertainty_list)
             
+            # Create list of tuples (species, confidence, uncertainty) and sort by confidence (descending)
+            species_data = []
+            for idx, species in enumerate(species_list):
+                confidence = confidence_list[idx] if idx < len(confidence_list) else 0.0
+                uncertainty = uncertainty_list[idx] if idx < len(uncertainty_list) else 0.0
+                try:
+                    conf_val = float(confidence)
+                    uncert_val = float(uncertainty)
+                except (ValueError, TypeError):
+                    conf_val = 0.0
+                    uncert_val = 0.0
+                species_data.append((species, conf_val, uncert_val))
+            
+            # Sort by confidence (highest first)
+            species_data.sort(key=lambda x: x[1], reverse=True)
+            
             # Create checklist for detected species
             selected_species = []
             
             # Display each detected species with its confidence
-            for idx, species in enumerate(species_list):
-                confidence = confidence_list[idx] if idx < len(confidence_list) else 0.0
-                uncertainty = uncertainty_list[idx] if idx < len(uncertainty_list) else 0.0
-                
-                # Convert to float if string
-                try:
-                    conf_val = float(confidence)
-                    #uncert_val = float(uncertainty)
-                    label = f"{species} (Birdnet conf: {conf_val:.2f})"
-                except (ValueError, TypeError):
-                    label = f"{species}"
+            for idx, (species, conf_val, uncert_val) in enumerate(species_data):
+                label = f"{species} (Birdnet conf: {conf_val:.2f})"
                 
                 if st.checkbox(label, key=f"species_{idx}"):
                     selected_species.append(species)
+            
+            none_of_above = st.checkbox(
+                "❌ None of the above species are present",
+                key="none_of_above",
+                help="Check this if you cannot hear any of the species listed above"
+            )
+            
+            # If "None of the above" is checked, clear selected species and add marker
+            if none_of_above:
+                selected_species = ["NONE_DETECTED"]
             
             st.markdown("---")
             
