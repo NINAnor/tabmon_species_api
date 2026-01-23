@@ -6,8 +6,8 @@ This module handles session state for Pro mode.
 
 import streamlit as st
 
-from pro.queries import get_random_assigned_clip
-from shared.session_utils import init_base_session, init_state_vars, check_params_changed
+from queries import get_random_assigned_clip
+from session_utils import init_base_session, init_state_vars, check_params_changed
 
 
 def initialize_pro_session():

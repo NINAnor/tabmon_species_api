@@ -9,7 +9,7 @@ import ast
 import pandas as pd
 import streamlit as st
 
-from pro.queries import get_remaining_pro_clips_count, get_top_species_for_database
+from queries import get_remaining_pro_clips_count, get_top_species_for_database
 
 
 def render_pro_validation_form(result, selections, top_species):
@@ -166,14 +166,8 @@ def _handle_pro_validation_submission(
     }
     
     # Save validation response
-    from shared.utils import save_pro_validation_response
+    from utils import save_pro_validation_response
     save_pro_validation_response(validation_data)
-    
-    # Clear cache for this user
-    get_remaining_pro_clips_count.clear()
-    from pro.queries import get_validated_pro_clips, get_assigned_clips_for_user
-    get_validated_pro_clips.clear()
-    get_assigned_clips_for_user.clear()
     
     # Clear current clip to force loading a new one
     st.session_state.pro_current_clip = None

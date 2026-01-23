@@ -1,14 +1,8 @@
-"""
-Pro Mode Database Queries
-
-This module contains database queries specific to the Pro mode,
-which uses a different database structure with userID and assigned annotations.
-"""
-
+"""Database queries for Pro mode."""
 import duckdb
 import streamlit as st
 
-from shared.config import (
+from config import (
     PRO_PARQUET_DATASET,
     S3_ACCESS_KEY_ID,
     S3_ENDPOINT,
@@ -18,20 +12,24 @@ from shared.config import (
 
 
 @st.cache_resource
-def get_pro_duckdb_connection():
-    """Create and configure DuckDB connection for Pro database."""
+def get_duckdb_connection():
+    """Create and configure DuckDB connection."""
     conn = duckdb.connect()
 
     conn.execute("INSTALL httpfs;")
     conn.execute("LOAD httpfs;")
 
-    # Configure S3 access (uses same config as normal mode)
-    conn.execute("SET s3_region='us-east-1';")
+    # Use SET statements instead of CREATE SECRET for better custom endpoint support
+    conn.execute("SET s3_region='us-east-1';")  # Use a standard region
     conn.execute(f"SET s3_access_key_id='{S3_ACCESS_KEY_ID}';")
     conn.execute(f"SET s3_secret_access_key='{S3_SECRET_ACCESS_KEY}';")
     conn.execute(f"SET s3_endpoint='{S3_ENDPOINT}';")
-    conn.execute("SET s3_use_ssl=true;")
-    conn.execute("SET s3_url_style='path';")
+    conn.execute(
+        "SET s3_use_ssl=true;"
+    )  # tells DuckDB to use HTTPS instead of HTTP when making S3 requests
+    conn.execute(
+        "SET s3_url_style='path';"
+    )  # controls the URL format DuckDB uses for S3 requests
 
     return conn
 
@@ -47,7 +45,7 @@ def check_user_has_annotations(user_id):
         bool: True if user has annotations, False otherwise
     """
     try:
-        conn = get_pro_duckdb_connection()
+        conn = get_duckdb_connection()
         query = f"""
         SELECT COUNT(*) as count
         FROM '{PRO_PARQUET_DATASET}'
@@ -55,35 +53,20 @@ def check_user_has_annotations(user_id):
         """
         result = conn.execute(query, [user_id]).fetchone()
         return result[0] > 0 if result else False
-    except Exception as e:
-        # If there's an error querying (e.g., file doesn't exist), return False
+    except Exception:
         return False
-
-
-@st.cache_data
-def get_available_user_ids():
-    """Get list of userIDs that have assigned annotations."""
-    conn = get_pro_duckdb_connection()
-    query = f"""
-    SELECT DISTINCT userID
-    FROM '{PRO_PARQUET_DATASET}'
-    WHERE userID IS NOT NULL
-    ORDER BY userID
-    """
-    result = conn.execute(query).fetchall()
-    return [row[0] for row in result]
 
 
 @st.cache_data
 def get_top_species_for_database():
     """
-    Get the top N species from the Pro database based on detection count.
+    Get the top N species from the database based on detection count.
     These will be used for the checklist validation.
     
     Returns:
         list: List of scientific names as Python list (not tuples)
     """
-    conn = get_pro_duckdb_connection()
+    conn = get_duckdb_connection()
     query = f"""
     SELECT "scientific name", COUNT(*) as detection_count
     FROM '{PRO_PARQUET_DATASET}'
@@ -92,7 +75,6 @@ def get_top_species_for_database():
     LIMIT {PRO_TOP_SPECIES_COUNT}
     """
     result = conn.execute(query).fetchall()
-    # Return as Python list of strings
     return [row[0] for row in result]
 
 
@@ -109,7 +91,7 @@ def get_assigned_clips_for_user(user_id, confidence_threshold=0.0):
     Returns:
         List of dicts with clip information
     """
-    conn = get_pro_duckdb_connection()
+    conn = get_duckdb_connection()
     query = f"""
     SELECT 
         fullPath as filename,
@@ -125,7 +107,6 @@ def get_assigned_clips_for_user(user_id, confidence_threshold=0.0):
     """
     results = conn.execute(query, [user_id]).fetchall()
     
-    # Return as list of dicts for efficient processing
     clips = [
         {
             "filename": row[0],
@@ -153,22 +134,61 @@ def get_validated_pro_clips(user_id):
     Returns:
         set: Set of (filename, start_time) tuples for validated clips
     """
-    from shared.utils import load_pro_validation_responses
+    import tempfile
+    from pathlib import Path
+    import boto3
+    import pandas as pd
+    from botocore.client import Config
+    from config import PRO_VALIDATIONS_PREFIX, S3_BUCKET, S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY
     
     try:
-        validated_df = load_pro_validation_responses()
-        if validated_df is not None and not validated_df.empty:
-            user_validated = validated_df[validated_df["userID"] == user_id]
-            return set(
-                zip(
-                    user_validated["filename"],
-                    user_validated["start_time"]
-                )
-            )
+        # Configure boto3 for S3 access
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{S3_ENDPOINT}",
+            aws_access_key_id=S3_ACCESS_KEY_ID,
+            aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+            config=Config(signature_version="s3v4"),
+        )
+        
+        # List all validation files
+        response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=PRO_VALIDATIONS_PREFIX)
+        
+        if "Contents" not in response:
+            return set()
+        
+        # Read and combine all validation files
+        all_validations = []
+        for obj in response["Contents"]:
+            if obj["Key"].endswith(".csv"):
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w+", suffix=".csv", delete=False
+                    ) as temp_file:
+                        try:
+                            s3_client.download_file(S3_BUCKET, obj["Key"], temp_file.name)
+                            df = pd.read_csv(temp_file.name)
+                            all_validations.append(df)
+                        finally:
+                            Path(temp_file.name).unlink()
+                except Exception:
+                    continue
+        
+        if not all_validations:
+            return set()
+        
+        # Combine all validation dataframes
+        combined_df = pd.concat(all_validations, ignore_index=True)
+        
+        # Filter for matching userID
+        filtered = combined_df[
+            combined_df["userID"].astype(str) == str(user_id)
+        ]
+        
+        return set(zip(filtered["filename"], filtered["start_time"]))
+        
     except Exception:
-        pass
-    
-    return set()
+        return set()
 
 
 def get_random_assigned_clip(user_id, confidence_threshold=0.0):
@@ -191,7 +211,7 @@ def get_random_assigned_clip(user_id, confidence_threshold=0.0):
     # Get validated clips as a set for fast lookup
     validated_clips = get_validated_pro_clips(user_id)
     
-    # Filter out validated clips using list comprehension (much faster than .apply())
+    # Filter out validated clips
     unvalidated = [
         clip for clip in all_clips
         if (clip["filename"], clip["start_time"]) not in validated_clips
@@ -226,7 +246,7 @@ def get_remaining_pro_clips_count(user_id, confidence_threshold=0.0):
     all_clips = get_assigned_clips_for_user(user_id, confidence_threshold)
     validated_clips = get_validated_pro_clips(user_id)
     
-    # Count unvalidated clips efficiently using sum with generator expression
+    # Count unvalidated clips efficiently
     unvalidated_count = sum(
         1 for clip in all_clips
         if (clip["filename"], clip["start_time"]) not in validated_clips

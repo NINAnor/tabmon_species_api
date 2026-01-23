@@ -7,7 +7,7 @@ This module contains UI components specific to Pro mode.
 import os
 import streamlit as st
 
-from shared.ui_utils import (
+from ui_utils import (
     render_sidebar_logo,
     render_spectrogram,
     render_audio_player,
@@ -45,12 +45,6 @@ def render_pro_help_section():
 5. **Rate your confidence** and audio quality
 6. **Submit** your annotations
 
-**Key Differences from Normal Mode:**
-- ✅ You work on **assigned clips** specific to your user ID
-- ✅ **Multi-species identification** using checklists
-- ✅ More detailed **quality assessment**
-- ✅ Progress tracking for your assignments
-
 **Tips for Better Annotations:**
 - 🎧 Use good quality headphones
 - 🔊 Listen to the entire clip, sometimes multiple times
@@ -64,12 +58,6 @@ def render_pro_help_section():
 **High Confidence:** Clear vocalization, easily identifiable
 **Moderate Confidence:** Recognizable but with some uncertainty
 **Low Confidence:** Difficult to identify, background noise, or distant calls
-
-**Audio Quality:**
-- **Excellent:** Crystal clear, no interference
-- **Good:** Clear with minor background noise
-- **Fair:** Audible but with noticeable interference
-- **Poor:** Difficult to hear, heavy interference
 """)
 
 
@@ -84,7 +72,7 @@ def render_pro_clip_section(result, selections):
     Returns:
         bool: True if clip was loaded successfully, False otherwise
     """
-    from shared.utils import extract_clip, get_single_file_path
+    from utils import extract_clip, get_single_file_path
 
     if not result:
         st.warning(f"No clips assigned for user {selections['user_id']}")
@@ -125,7 +113,7 @@ def render_pro_load_new_button():
         st.session_state.pro_current_clip = None
         st.session_state.pro_clip_params = None
         
-        from pro.queries import (
+        from queries import (
             get_validated_pro_clips,
             get_assigned_clips_for_user,
             get_remaining_pro_clips_count

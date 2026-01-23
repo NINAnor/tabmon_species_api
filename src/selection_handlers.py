@@ -6,8 +6,8 @@ This module manages user input selections for Pro mode.
 
 import streamlit as st
 
-from pro.queries import check_user_has_annotations
-from shared.ui_utils import render_sidebar_logo
+from queries import check_user_has_annotations
+from ui_utils import render_sidebar_logo
 
 
 def render_pro_authentication():
@@ -67,7 +67,7 @@ def get_pro_user_selections():
     Get user selections for Pro mode.
     
     Returns:
-        Dictionary with user_id and confidence_threshold, or None if not authenticated
+        Dictionary with user_id, or None if not authenticated
     """
     # Authentication check
     is_authenticated, user_id = render_pro_authentication()
@@ -76,23 +76,9 @@ def get_pro_user_selections():
         return None
     
     st.sidebar.markdown("---")
-    st.sidebar.header("🔍 Parameters")
-    
-    # Confidence threshold (same as normal mode)
-    confidence_threshold = st.sidebar.slider(
-        "Minimum Confidence Threshold",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.0,
-        step=0.1,
-        help="Only show clips with BirdNET confidence above this threshold",
-    )
-    
-    # Show user info
-    st.sidebar.markdown("---")
     st.sidebar.info(f"👤 **User:** {user_id}")
     
     return {
         "user_id": user_id,
-        "confidence_threshold": confidence_threshold,
+        "confidence_threshold": 0.0,  # Default to 0.0, no longer configurable
     }
