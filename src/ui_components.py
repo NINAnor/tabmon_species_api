@@ -72,7 +72,7 @@ def render_pro_clip_section(result, selections):
     Returns:
         bool: True if clip was loaded successfully, False otherwise
     """
-    from utils import extract_clip, get_single_file_path
+    from utils import extract_clip
 
     if not result:
         st.warning(f"No clips assigned for user {selections['user_id']}")

@@ -49,9 +49,6 @@ def main():
 
     # Load clip based on selections
     result = get_or_load_pro_clip(selections)
-    
-    # Get top species for checklist
-    top_species = get_top_species_for_database()
 
     # Main content: Audio Clip and Validation side by side
     col1, col2 = st.columns([1, 1])
@@ -61,7 +58,7 @@ def main():
 
     with col2:
         if result and not result.get("all_validated") and clip_loaded:
-            render_pro_validation_form(result, selections, top_species)
+            render_pro_validation_form(result, selections)
         elif result and result.get("all_validated"):
             render_pro_all_validated_placeholder()
         else:

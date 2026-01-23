@@ -53,8 +53,9 @@ def get_species_display_names(species_list, language_code):
     return species_map
 
 
+@st.cache_data(ttl=600, show_spinner=False)  # Cache for 10 minutes, no spinner (parent shows it)
 def extract_clip(s3_url, start_time, sr=48000):
-    """Extract a 3-second audio clip from S3 file."""
+    """Extract a 9-second audio clip from S3 file (3s before + 6s after detection)."""
 
     if s3_url is None:
         st.error("Could not find audio file in S3")
@@ -94,78 +95,6 @@ def extract_clip(s3_url, start_time, sr=48000):
             Path(temp_file.name).unlink()
 
 
-def get_single_file_path(filename, country, deployment_id):
-    """Get the S3 URL for audio file by searching S3 efficiently."""
-    if country == "France":
-        suffix = "_FR"
-    elif country == "Spain":
-        suffix = "_ES"
-    elif country == "Netherlands":
-        suffix = "_NL"
-    elif country == "Norway":
-        suffix = ""
-    else:
-        suffix = ""
-
-    # Configure boto3 for S3 access
-    s3_client = boto3.client(
-        "s3",
-        endpoint_url=f"https://{S3_ENDPOINT}",
-        aws_access_key_id=S3_ACCESS_KEY_ID,
-        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
-    )
-
-    # get bucket name from url
-    bucket = S3_BASE_URL.replace("s3://", "")
-
-    # search directory structure
-    country_prefix = f"proj_tabmon_NINA{suffix}/"
-
-    try:
-        # First, get all device directories (bugg_RPiID-*)
-        response = s3_client.list_objects_v2(
-            Bucket=bucket, Prefix=country_prefix, Delimiter="/"
-        )
-
-        if "CommonPrefixes" not in response:
-            st.warning(f"No device directories found under {country_prefix}")
-            return None
-
-        # For each device directory, look for conf_ subdirectories
-        for device_prefix in response["CommonPrefixes"]:
-            device_path = device_prefix["Prefix"]
-
-            # Get subdirectories under this device (conf_* directories)
-            subdir_response = s3_client.list_objects_v2(
-                Bucket=bucket, Prefix=device_path, Delimiter="/"
-            )
-
-            if "CommonPrefixes" not in subdir_response:
-                continue
-
-            # For each conf_ directory, check if our file exists
-            for conf_prefix in subdir_response["CommonPrefixes"]:
-                conf_path = conf_prefix["Prefix"]
-                potential_file_key = f"{conf_path}{filename}"
-
-                # Check if this specific file exists
-                try:
-                    s3_client.head_object(Bucket=bucket, Key=potential_file_key)
-                    return f"s3://{bucket}/{potential_file_key}"
-                except s3_client.exceptions.NoSuchKey:
-                    continue  # File doesn't exist in this location
-                except Exception:  # noqa: S112
-                    continue  # Other error, keep searching
-
-    except Exception as e:
-        st.error(f"Error searching for file: {e}")
-        return None
-
-    st.error(f"Could not find file {filename} in country {country}")
-    return None
-
-
 def save_pro_validation_response(validation_data):
     """
     Save Pro mode validation to session-specific file.
@@ -189,13 +118,23 @@ def save_pro_validation_response(validation_data):
     # Use session ID as filename: validations_pro/session_{session_id}.csv
     key = f"{PRO_VALIDATIONS_PREFIX}/session_{session_id}.csv"
 
-    # Convert list of species to JSON string for CSV storage
+    # Convert arrays to pipe-separated strings for clean CSV storage
     validation_data_copy = validation_data.copy()
-    if isinstance(validation_data_copy.get("identified_species"), list):
-        import json
-        validation_data_copy["identified_species"] = json.dumps(
-            validation_data_copy["identified_species"]
-        )
+    
+    # Helper to convert list/array to pipe-separated string
+    def list_to_string(value):
+        if isinstance(value, list):
+            return "|".join(str(item) for item in value)
+        elif isinstance(value, str):
+            # Already a string (might be from parquet), keep as is
+            return value
+        return value
+    
+    # Convert all array fields
+    validation_data_copy["identified_species"] = list_to_string(validation_data_copy.get("identified_species"))
+    validation_data_copy["birdnet_species_detected"] = list_to_string(validation_data_copy.get("birdnet_species_detected"))
+    validation_data_copy["birdnet_confidences"] = list_to_string(validation_data_copy.get("birdnet_confidences"))
+    validation_data_copy["birdnet_uncertainties"] = list_to_string(validation_data_copy.get("birdnet_uncertainties"))
     
     validation_df = pd.DataFrame([validation_data_copy])
 
@@ -229,9 +168,16 @@ def save_pro_validation_response(validation_data):
                 finally:
                     Path(temp_file.name).unlink()
 
-        # Clear validation-related caches so next query reflects new validation
-        from queries import get_validated_pro_clips, get_remaining_pro_clips_count
-        get_validated_pro_clips.clear()
+        # Track validated clip in session state to avoid showing it again
+        # without needing to clear caches and re-query
+        if 'pro_validated_in_session' not in st.session_state:
+            st.session_state.pro_validated_in_session = set()
+        
+        clip_key = (validation_data["filename"], validation_data["start_time"])
+        st.session_state.pro_validated_in_session.add(clip_key)
+        
+        # Only clear count cache (lightweight) - keep validated_clips cache intact
+        from queries import get_remaining_pro_clips_count
         get_remaining_pro_clips_count.clear()
         return True
     except Exception as e:

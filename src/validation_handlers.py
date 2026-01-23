@@ -13,14 +13,25 @@ from queries import get_remaining_pro_clips_count, get_top_species_for_database
 from utils import get_species_display_names
 
 
-def render_pro_validation_form(result, selections, top_species):
+@st.cache_data(show_spinner=False)
+def _parse_array_string(array_str):
+    """Parse array string from parquet, handling Unicode quotes.
+    Cached to avoid repeated parsing of same data."""
+    if not isinstance(array_str, str):
+        return array_str
+    
+    # Replace Unicode curly quotes with ASCII quotes
+    cleaned = array_str.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
+    return ast.literal_eval(cleaned)
+
+
+def render_pro_validation_form(result, selections):
     """
     Render the Pro mode validation form with species checklist.
     
     Args:
         result: Dictionary containing clip information
         selections: Dictionary containing user selections
-        top_species: List of top 10 species scientific names
     """
     with st.container(border=True):
         st.markdown("### 🎯 Pro Validation")
@@ -42,23 +53,9 @@ def render_pro_validation_form(result, selections, top_species):
             st.markdown("---")
             
             # Get the detected species arrays
-            species_list = result.get('species_array', [])
-            confidence_list = result.get('confidence_array', [])
-            uncertainty_list = result.get('uncertainty_array', [])
-
-            # Parse string representations to lists
-            # Replace Unicode curly quotes with ASCII quotes before parsing
-            if isinstance(species_list, str):
-                species_list = species_list.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
-                species_list = ast.literal_eval(species_list)
-            
-            if isinstance(confidence_list, str):
-                confidence_list = confidence_list.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
-                confidence_list = ast.literal_eval(confidence_list)
-            
-            if isinstance(uncertainty_list, str):
-                uncertainty_list = uncertainty_list.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
-                uncertainty_list = ast.literal_eval(uncertainty_list)
+            species_list = _parse_array_string(result.get('species_array', []))
+            confidence_list = _parse_array_string(result.get('confidence_array', []))
+            uncertainty_list = _parse_array_string(result.get('uncertainty_array', []))
             
             # Create list of tuples (species, confidence, uncertainty) and sort by confidence (descending)
             species_data = []
@@ -141,17 +138,16 @@ def render_pro_validation_form(result, selections, top_species):
                 _handle_pro_validation_submission(
                     result,
                     selections,
-                selected_species,
-                other_species,
-                user_notes,
-                user_confidence,
-                top_species
-            )
+                    selected_species,
+                    other_species,
+                    user_notes,
+                    user_confidence
+                )
 
 
 def _handle_pro_validation_submission(
     result, selections, selected_species, other_species, 
-    user_notes, user_confidence, top_species
+    user_notes, user_confidence
 ):
     """
     Handle Pro mode validation form submission.
@@ -163,7 +159,6 @@ def _handle_pro_validation_submission(
         other_species: String of additional species names
         user_notes: User's notes/comments
         user_confidence: User's confidence level
-        top_species: List of top 10 species (for reference)
     """
     # Validation: require at least confidence rating
     if not user_confidence:

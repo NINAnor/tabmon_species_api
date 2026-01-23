@@ -78,15 +78,15 @@ def get_top_species_for_database():
     return [row[0] for row in result]
 
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=600, show_spinner="Loading assigned clips...")  # Cache for 10 minutes
 def get_assigned_clips_for_user(user_id):
     """
     Get all assigned clips for a specific userID.
     Returns list of dicts for efficient processing.
+    CACHED to avoid repeated parquet queries.
     
     Args:
         user_id: The user's ID (can be string or int)
-        confidence_threshold: Minimum confidence score filter
         
     Returns:
         List of dicts with clip information
@@ -191,9 +191,21 @@ def get_validated_pro_clips(user_id):
         return set()
 
 
+def _get_validated_clips_with_session(user_id):
+    """Get all validated clips including session state."""
+    validated_clips = get_validated_pro_clips(user_id)
+    
+    # Add clips validated in current session
+    if hasattr(st.session_state, 'pro_validated_in_session'):
+        validated_clips = validated_clips.union(st.session_state.pro_validated_in_session)
+    
+    return validated_clips
+
+
 def get_random_assigned_clip(user_id):
     """
     Get a random unvalidated clip assigned to the user.
+    Uses DuckDB for filtering and random selection (faster than Python).
     
     Args:
         user_id: The user's ID
@@ -202,53 +214,112 @@ def get_random_assigned_clip(user_id):
         dict: Clip information or None if no clips available
         dict with 'all_validated': True if all clips are validated
     """
-    all_clips = get_assigned_clips_for_user(user_id)
+    conn = get_duckdb_connection()
     
-    if not all_clips:
+    # Get validated clips (from cache + session state)
+    validated_clips = _get_validated_clips_with_session(user_id)
+    
+    # If there are validated clips, build exclusion clause
+    if validated_clips:
+        # Create list of tuples for SQL IN clause
+        validated_tuples = [(filename, start_time) for filename, start_time in validated_clips]
+        
+        # Build query with exclusion - let DuckDB do the filtering
+        placeholders = ",".join(["(?, ?)" for _ in validated_tuples])
+        exclusion_clause = f"""AND (fullPath, "start time") NOT IN ({placeholders})"""
+        
+        # Flatten the tuples for query parameters
+        exclusion_params = []
+        for filename, start_time in validated_tuples:
+            exclusion_params.extend([filename, start_time])
+    else:
+        exclusion_clause = ""
+        exclusion_params = []
+    
+    # Query for random unvalidated clip - DuckDB does filtering + random selection
+    query = f"""
+    SELECT 
+        fullPath as filename,
+        deployment_id,
+        "start time" as start_time,
+        "scientific name" as species_array,
+        confidence as confidence_array,
+        "max uncertainty" as uncertainty_array,
+        userID
+    FROM '{PRO_PARQUET_DATASET}'
+    WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
+    {exclusion_clause}
+    ORDER BY random()
+    LIMIT 1
+    """
+    
+    try:
+        result = conn.execute(query, [user_id] + exclusion_params).fetchone()
+        
+        if result:
+            return {
+                "filename": result[0],
+                "deployment_id": result[1],
+                "start_time": result[2],
+                "species_array": result[3],
+                "confidence_array": result[4],
+                "uncertainty_array": result[5],
+                "userID": result[6],
+                "all_validated": False
+            }
+        else:
+            # No unvalidated clips found - check if user has any clips at all
+            count_query = f"""
+            SELECT COUNT(*) as count
+            FROM '{PRO_PARQUET_DATASET}'
+            WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
+            """
+            total = conn.execute(count_query, [user_id]).fetchone()[0]
+            
+            if total > 0:
+                return {
+                    "all_validated": True,
+                    "total_clips": total
+                }
+            else:
+                return None
+    except Exception as e:
+        st.error(f"Error fetching random clip: {e}")
         return None
-    
-    # Get validated clips as a set for fast lookup
-    validated_clips = get_validated_pro_clips(user_id)
-    
-    # Filter out validated clips
-    unvalidated = [
-        clip for clip in all_clips
-        if (clip["filename"], clip["start_time"]) not in validated_clips
-    ]
-    
-    # If all clips are validated
-    if not unvalidated:
-        return {
-            "all_validated": True,
-            "total_clips": len(all_clips)
-        }
-    
-    # Get random clip from unvalidated
-    import random
-    random_clip = random.choice(unvalidated)
-    
-    return {
-        "filename": random_clip["filename"],
-        "species_array": random_clip["species_array"],
-        "confidence_array": random_clip["confidence_array"],
-        "uncertainty_array": random_clip["uncertainty_array"],
-        "start_time": random_clip["start_time"],
-        "deployment_id": random_clip["deployment_id"],
-        "userID": random_clip["userID"],
-        "all_validated": False
-    }
 
 
 @st.cache_data
 def get_remaining_pro_clips_count(user_id):
-    """Get count of remaining unvalidated clips for user."""
-    all_clips = get_assigned_clips_for_user(user_id)
-    validated_clips = get_validated_pro_clips(user_id)
+    """Get count of remaining unvalidated clips for user.
+    Uses DuckDB COUNT for better performance."""
+    conn = get_duckdb_connection()
     
-    # Count unvalidated clips efficiently
-    unvalidated_count = sum(
-        1 for clip in all_clips
-        if (clip["filename"], clip["start_time"]) not in validated_clips
-    )
+    # Get validated clips (from cache + session state)
+    validated_clips = _get_validated_clips_with_session(user_id)
     
-    return unvalidated_count
+    # If there are validated clips, build exclusion clause
+    if validated_clips:
+        validated_tuples = [(filename, start_time) for filename, start_time in validated_clips]
+        placeholders = ",".join(["(?, ?)" for _ in validated_tuples])
+        exclusion_clause = f"""AND (fullPath, "start time") NOT IN ({placeholders})"""
+        
+        exclusion_params = []
+        for filename, start_time in validated_tuples:
+            exclusion_params.extend([filename, start_time])
+    else:
+        exclusion_clause = ""
+        exclusion_params = []
+    
+    # Use DuckDB COUNT - much faster than Python iteration
+    query = f"""
+    SELECT COUNT(*) as count
+    FROM '{PRO_PARQUET_DATASET}'
+    WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
+    {exclusion_clause}
+    """
+    
+    try:
+        result = conn.execute(query, [user_id] + exclusion_params).fetchone()
+        return result[0] if result else 0
+    except Exception:
+        return 0
