@@ -2,8 +2,8 @@
 
 import streamlit as st
 from config import LANGUAGE_MAPPING
-from queries import check_user_has_annotations
-from ui_utils import render_sidebar_logo
+from database.queries import check_user_has_annotations
+from ui.ui_utils import render_sidebar_logo
 
 
 def render_pro_authentication():

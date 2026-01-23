@@ -2,7 +2,7 @@
 
 import os
 import streamlit as st
-from ui_utils import (
+from ui.ui_utils import (
     render_sidebar_logo, render_spectrogram, render_audio_player,
     render_clip_metadata, render_all_validated_message, clear_cache_functions,
 )
@@ -15,7 +15,8 @@ def render_pro_page_header():
     st.markdown(
         "Welcome to the Expert annotation mode. You have been assigned specific clips "
         "to annotate with detailed species identification. "
-        "Please carefully listen to each clip and select all species you can identify.",
+        "Please carefully listen to each clip and select all species you can identify." \
+        "**Note that the app initialization may take a minute or two.**",
         text_alignment="center",
     )
 
@@ -38,14 +39,13 @@ def render_pro_help_section():
 - 🔊 Listen to the entire clip, sometimes multiple times
 - 🔍 Check the spectrogram for visual confirmation
 - 📝 Add notes about uncertainties or background noise
-- ⚠️ Be conservative - only select species you're confident about
 """)
 
         st.markdown("""### 🎯 Quality Guidelines
 
-**High Confidence:** Clear vocalization, easily identifiable
-**Moderate Confidence:** Recognizable but with some uncertainty
-**Low Confidence:** Difficult to identify, background noise, or distant calls
+- **High Confidence:** Clear vocalization, easily identifiable
+- **Moderate Confidence:** Recognizable but with some uncertainty
+- **Low Confidence:** Difficult to identify, background noise, or distant calls
 """)
 
 
@@ -95,7 +95,7 @@ def render_pro_load_new_button():
         st.session_state.expert_current_clip = None
         st.session_state.expert_clip_params = None
         
-        from queries import (
+        from database.queries import (
             get_validated_pro_clips,
             get_assigned_clips_for_user,
             get_remaining_pro_clips_count

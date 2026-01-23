@@ -45,7 +45,7 @@ def get_top_species_for_database():
     return [row[0] for row in conn.execute(query).fetchall()]
 
 
-@st.cache_data(ttl=600, show_spinner="Loading assigned clips...")  # Cache for 10 minutes
+@st.cache_data(ttl=1800, show_spinner="Loading assigned clips...")  # Cache for 10 minutes
 def get_assigned_clips_for_user(user_id):
     """
     Get all assigned clips for a specific userID.

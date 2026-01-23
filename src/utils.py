@@ -143,7 +143,7 @@ def save_pro_validation_response(validation_data):
         if 'expert_remaining_count' in st.session_state and st.session_state.expert_remaining_count is not None:
             st.session_state.expert_remaining_count = max(0, st.session_state.expert_remaining_count - 1)
         
-        from queries import get_remaining_pro_clips_count
+        from database.queries import get_remaining_pro_clips_count
         get_remaining_pro_clips_count.clear()
         return True
     except Exception as e:

@@ -1,8 +1,8 @@
 """Expert Mode Session Management."""
 
 import streamlit as st
-from queries import get_random_assigned_clip
-from session_utils import init_base_session, init_state_vars, check_params_changed
+from database.queries import get_random_assigned_clip
+from session.session_utils import init_base_session, init_state_vars, check_params_changed
 
 
 def initialize_pro_session():
@@ -25,7 +25,7 @@ def clear_pro_clip_state():
     st.session_state.expert_validated_clips_session = set()
     st.session_state.expert_remaining_count = None
     
-    from queries import get_validated_pro_clips, get_remaining_pro_clips_count
+    from database.queries import get_validated_pro_clips, get_remaining_pro_clips_count
     get_validated_pro_clips.clear()
     get_remaining_pro_clips_count.clear()
 
@@ -46,7 +46,7 @@ def get_or_load_pro_clip(selections):
     if st.session_state.expert_current_clip is None:
         # Initialize remaining count on first load
         if st.session_state.expert_remaining_count is None:
-            from queries import get_remaining_pro_clips_count
+            from database.queries import get_remaining_pro_clips_count
             st.session_state.expert_remaining_count = get_remaining_pro_clips_count(selections["user_id"])
         
         st.session_state.expert_current_clip = get_random_assigned_clip(

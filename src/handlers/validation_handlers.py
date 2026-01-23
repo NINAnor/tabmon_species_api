@@ -4,7 +4,7 @@ import ast
 import pandas as pd
 import streamlit as st
 
-from queries import get_remaining_pro_clips_count, get_top_species_for_database
+from database.queries import get_remaining_pro_clips_count, get_top_species_for_database
 from utils import get_species_display_names, load_species_translations
 
 
@@ -152,16 +152,21 @@ def _handle_pro_validation_submission(result, selections, selected_species, othe
     
     all_identified_species = selected_species + additional_species
     
+    # Parse arrays from parquet to ensure they're proper lists
+    birdnet_species = _parse_array_string(result.get("species_array", []))
+    birdnet_confidences = _parse_array_string(result.get("confidence_array", []))
+    birdnet_uncertainties = _parse_array_string(result.get("uncertainty_array", []))
+    
     # Prepare validation data
     validation_data = {
         "filename": result["filename"],
         "userID": selections["user_id"],
         "deployment_id": result.get("deployment_id", ""),
-        "birdnet_species_detected": result.get("species_array", []),
-        "birdnet_confidences": result.get("confidence_array", []),
-        "birdnet_uncertainties": result.get("uncertainty_array", []),  # Array of uncertainties
+        "birdnet_species_detected": birdnet_species,
+        "birdnet_confidences": birdnet_confidences,
+        "birdnet_uncertainties": birdnet_uncertainties,
         "start_time": result["start_time"],
-        "identified_species": all_identified_species,  # List of species user confirmed/added
+        "identified_species": all_identified_species,
         "species_count": len(all_identified_species),  # Number of species identified
         "user_confidence": user_confidence,
         "user_notes": user_notes,

@@ -7,18 +7,18 @@ Expert mode is designed for assigned annotation tasks with user authentication.
 
 import streamlit as st
 
-from ui_utils import setup_page_config
-from session_manager import initialize_pro_session, get_or_load_pro_clip
-from selection_handlers import get_pro_user_selections
-from ui_components import (
+from ui.ui_utils import setup_page_config
+from session.session_manager import initialize_pro_session, get_or_load_pro_clip
+from handlers.selection_handlers import get_pro_user_selections
+from ui.ui_components import (
     render_pro_page_header,
     render_pro_help_section,
     render_pro_clip_section,
     render_pro_empty_validation_placeholder,
     render_pro_all_validated_placeholder,
 )
-from validation_handlers import render_pro_validation_form
-from queries import get_top_species_for_database
+from handlers.validation_handlers import render_pro_validation_form
+from database.queries import get_top_species_for_database
 
 
 def main():
