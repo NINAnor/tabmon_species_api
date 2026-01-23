@@ -7,26 +7,25 @@ Expert mode is designed for assigned annotation tasks with user authentication.
 
 import streamlit as st
 
-from ui.ui_utils import setup_page_config
-from session.session_manager import initialize_pro_session, get_or_load_pro_clip
 from handlers.selection_handlers import get_pro_user_selections
+from handlers.validation_handlers import render_pro_validation_form
+from session.session_manager import get_or_load_pro_clip, initialize_pro_session
 from ui.ui_components import (
-    render_pro_page_header,
-    render_pro_help_section,
+    render_pro_all_validated_placeholder,
     render_pro_clip_section,
     render_pro_empty_validation_placeholder,
-    render_pro_all_validated_placeholder,
+    render_pro_help_section,
+    render_pro_page_header,
 )
-from handlers.validation_handlers import render_pro_validation_form
-from database.queries import get_top_species_for_database
+from ui.ui_utils import setup_page_config
 
 
 def main():
     """Main application entry point for Expert mode."""
-    
+
     # Setup page configuration
     setup_page_config()
-    
+
     # Initialize Expert session
     initialize_pro_session()
     render_pro_page_header()
@@ -34,7 +33,7 @@ def main():
 
     # Get user selections (includes authentication)
     selections = get_pro_user_selections()
-    
+
     # If not authenticated, show placeholder and return
     if selections is None:
         st.markdown("---")
@@ -67,5 +66,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

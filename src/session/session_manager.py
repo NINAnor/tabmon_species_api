@@ -1,21 +1,29 @@
 """Expert Mode Session Management."""
 
 import streamlit as st
+
 from database.queries import get_random_assigned_clip
-from session.session_utils import init_base_session, init_state_vars, check_params_changed
+from session.session_utils import (
+    check_params_changed,
+    init_base_session,
+    init_state_vars,
+)
 
 
 def initialize_pro_session():
     """Initialize Expert mode session state variables."""
     init_base_session()
-    init_state_vars('expert_', {
-        'current_clip': None,
-        'clip_params': None,
-        'authenticated': False,
-        'user_id': None,
-        'validated_clips_session': set(),
-        'remaining_count': None
-    })
+    init_state_vars(
+        "expert_",
+        {
+            "current_clip": None,
+            "clip_params": None,
+            "authenticated": False,
+            "user_id": None,
+            "validated_clips_session": set(),
+            "remaining_count": None,
+        },
+    )
 
 
 def clear_pro_clip_state():
@@ -24,8 +32,9 @@ def clear_pro_clip_state():
     st.session_state.expert_clip_params = None
     st.session_state.expert_validated_clips_session = set()
     st.session_state.expert_remaining_count = None
-    
-    from database.queries import get_validated_pro_clips, get_remaining_pro_clips_count
+
+    from database.queries import get_remaining_pro_clips_count, get_validated_pro_clips
+
     get_validated_pro_clips.clear()
     get_remaining_pro_clips_count.clear()
 
@@ -33,12 +42,15 @@ def clear_pro_clip_state():
 def get_or_load_pro_clip(selections):
     """Get current Expert clip or load a new one if needed."""
     initialize_pro_session()
-    
+
     # Include language_code in params to detect language changes
-    current_params = (selections["user_id"], selections.get("language_code", "Scientific_Name"))
+    current_params = (
+        selections["user_id"],
+        selections.get("language_code", "Scientific_Name"),
+    )
 
     # If parameters changed, clear and reload
-    if check_params_changed('expert_clip_params', current_params):
+    if check_params_changed("expert_clip_params", current_params):
         clear_pro_clip_state()
         st.session_state.expert_clip_params = current_params
 
@@ -47,8 +59,11 @@ def get_or_load_pro_clip(selections):
         # Initialize remaining count on first load
         if st.session_state.expert_remaining_count is None:
             from database.queries import get_remaining_pro_clips_count
-            st.session_state.expert_remaining_count = get_remaining_pro_clips_count(selections["user_id"])
-        
+
+            st.session_state.expert_remaining_count = get_remaining_pro_clips_count(
+                selections["user_id"]
+            )
+
         st.session_state.expert_current_clip = get_random_assigned_clip(
             selections["user_id"],
         )

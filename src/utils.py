@@ -1,4 +1,5 @@
 """Shared utility functions for Expert mode."""
+
 import tempfile
 from pathlib import Path
 
@@ -11,7 +12,6 @@ from botocore.client import Config
 from config import (
     BIRDNET_MULTILINGUAL_PATH,
     S3_ACCESS_KEY_ID,
-    S3_BASE_URL,
     S3_ENDPOINT,
     S3_SECRET_ACCESS_KEY,
 )
@@ -34,12 +34,12 @@ def get_species_display_names(species_list, language_code):
     for species in species_list:
         translation_row = translations_df[translations_df["Scientific_Name"] == species]
         translated_name = species  # Default fallback
-        
+
         if not translation_row.empty and language_code in translation_row.columns:
             trans = translation_row[language_code].iloc[0]
             if pd.notna(trans):
                 translated_name = trans
-        
+
         species_map[translated_name] = species
 
     return species_map
@@ -79,7 +79,7 @@ def save_pro_validation_response(validation_data):
     Expert validations include multiple species in a list format.
     """
     from config import EXPERT_VALIDATIONS_PREFIX, S3_BUCKET
-    
+
     session_id = st.session_state.session_id
 
     # Configure boto3 for S3 access
@@ -97,21 +97,31 @@ def save_pro_validation_response(validation_data):
 
     # Convert arrays to pipe-separated strings for clean CSV storage
     def list_to_string(value):
-        return "|".join(str(item) for item in value) if isinstance(value, list) else value
-    
+        return (
+            "|".join(str(item) for item in value) if isinstance(value, list) else value
+        )
+
     validation_data_copy = {
         **validation_data,
         "identified_species": list_to_string(validation_data.get("identified_species")),
-        "birdnet_species_detected": list_to_string(validation_data.get("birdnet_species_detected")),
-        "birdnet_confidences": list_to_string(validation_data.get("birdnet_confidences")),
-        "birdnet_uncertainties": list_to_string(validation_data.get("birdnet_uncertainties")),
+        "birdnet_species_detected": list_to_string(
+            validation_data.get("birdnet_species_detected")
+        ),
+        "birdnet_confidences": list_to_string(
+            validation_data.get("birdnet_confidences")
+        ),
+        "birdnet_uncertainties": list_to_string(
+            validation_data.get("birdnet_uncertainties")
+        ),
     }
-    
+
     validation_df = pd.DataFrame([validation_data_copy])
 
     def save_to_s3(df, bucket, key):
         """Helper to save DataFrame to S3."""
-        with tempfile.NamedTemporaryFile(mode="w+", suffix=".csv", delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".csv", delete=False
+        ) as temp_file:
             try:
                 df.to_csv(temp_file.name, index=False)
                 s3_client.upload_file(temp_file.name, bucket, key)
@@ -122,11 +132,15 @@ def save_pro_validation_response(validation_data):
         # Append to existing file or create new one
         try:
             s3_client.head_object(Bucket=bucket, Key=key)
-            with tempfile.NamedTemporaryFile(mode="w+", suffix=".csv", delete=False) as temp_file:
+            with tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".csv", delete=False
+            ) as temp_file:
                 try:
                     s3_client.download_file(bucket, key, temp_file.name)
                     existing_df = pd.read_csv(temp_file.name)
-                    combined_df = pd.concat([existing_df, validation_df], ignore_index=True)
+                    combined_df = pd.concat(
+                        [existing_df, validation_df], ignore_index=True
+                    )
                     save_to_s3(combined_df, bucket, key)
                 finally:
                     Path(temp_file.name).unlink()
@@ -134,16 +148,22 @@ def save_pro_validation_response(validation_data):
             save_to_s3(validation_df, bucket, key)
 
         # Track in session state and update counter
-        if 'expert_validated_clips_session' not in st.session_state:
+        if "expert_validated_clips_session" not in st.session_state:
             st.session_state.expert_validated_clips_session = set()
-        
+
         clip_key = (validation_data["filename"], validation_data["start_time"])
         st.session_state.expert_validated_clips_session.add(clip_key)
-        
-        if 'expert_remaining_count' in st.session_state and st.session_state.expert_remaining_count is not None:
-            st.session_state.expert_remaining_count = max(0, st.session_state.expert_remaining_count - 1)
-        
+
+        if (
+            "expert_remaining_count" in st.session_state
+            and st.session_state.expert_remaining_count is not None
+        ):
+            st.session_state.expert_remaining_count = max(
+                0, st.session_state.expert_remaining_count - 1
+            )
+
         from database.queries import get_remaining_pro_clips_count
+
         get_remaining_pro_clips_count.clear()
         return True
     except Exception as e:

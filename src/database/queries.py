@@ -1,13 +1,14 @@
 """Database queries for Expert mode."""
+
 import duckdb
 import streamlit as st
 
 from config import (
     EXPERT_PARQUET_DATASET,
+    EXPERT_TOP_SPECIES_COUNT,
     S3_ACCESS_KEY_ID,
     S3_ENDPOINT,
     S3_SECRET_ACCESS_KEY,
-    EXPERT_TOP_SPECIES_COUNT,
 )
 
 
@@ -30,7 +31,10 @@ def check_user_has_annotations(user_id):
     """Check if user has any assigned annotations."""
     try:
         conn = get_duckdb_connection()
-        query = f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)"
+        query = (
+            f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' "
+            "WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)"
+        )
         result = conn.execute(query, [user_id]).fetchone()
         return result[0] > 0 if result else False
     except Exception:
@@ -41,26 +45,33 @@ def check_user_has_annotations(user_id):
 def get_top_species_for_database():
     """Get top N species by detection count for checklist."""
     conn = get_duckdb_connection()
-    query = f'SELECT "scientific name", COUNT(*) as count FROM \'{EXPERT_PARQUET_DATASET}\' GROUP BY "scientific name" ORDER BY count DESC LIMIT {EXPERT_TOP_SPECIES_COUNT}'
+    query = (
+        f'SELECT "scientific name", COUNT(*) as count '
+        f"FROM '{EXPERT_PARQUET_DATASET}' "
+        f'GROUP BY "scientific name" ORDER BY count DESC '
+        f"LIMIT {EXPERT_TOP_SPECIES_COUNT}"
+    )
     return [row[0] for row in conn.execute(query).fetchall()]
 
 
-@st.cache_data(ttl=1800, show_spinner="Loading assigned clips...")  # Cache for 10 minutes
+@st.cache_data(
+    ttl=1800, show_spinner="Loading assigned clips..."
+)  # Cache for 10 minutes
 def get_assigned_clips_for_user(user_id):
     """
     Get all assigned clips for a specific userID.
     Returns list of dicts for efficient processing.
     CACHED to avoid repeated parquet queries.
-    
+
     Args:
         user_id: The user's ID (can be string or int)
-        
+
     Returns:
         List of dicts with clip information
     """
     conn = get_duckdb_connection()
     query = f"""
-    SELECT 
+    SELECT
         fullPath as filename,
         deployment_id,
         "start time" as start_time,
@@ -73,7 +84,7 @@ def get_assigned_clips_for_user(user_id):
     ORDER BY filename, start_time
     """
     results = conn.execute(query, [user_id]).fetchall()
-    
+
     clips = [
         {
             "filename": row[0],
@@ -82,24 +93,34 @@ def get_assigned_clips_for_user(user_id):
             "species_array": row[3],
             "confidence_array": row[4],
             "uncertainty_array": row[5],
-            "userID": row[6]
+            "userID": row[6],
         }
         for row in results
     ]
-    
+
     return clips
 
 
 @st.cache_data(ttl=300)
 def get_validated_pro_clips(user_id):
-    """Get clips already validated by this user. Returns set of (filename, start_time) tuples."""
+    """Get clips already validated by this user.
+    Returns set of (filename, start_time) tuples.
+    """
     import tempfile
     from pathlib import Path
+
     import boto3
     import pandas as pd
     from botocore.client import Config
-    from config import EXPERT_VALIDATIONS_PREFIX, S3_BUCKET, S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY
-    
+
+    from config import (
+        EXPERT_VALIDATIONS_PREFIX,
+        S3_ACCESS_KEY_ID,
+        S3_BUCKET,
+        S3_ENDPOINT,
+        S3_SECRET_ACCESS_KEY,
+    )
+
     try:
         s3_client = boto3.client(
             "s3",
@@ -108,11 +129,13 @@ def get_validated_pro_clips(user_id):
             aws_secret_access_key=S3_SECRET_ACCESS_KEY,
             config=Config(signature_version="s3v4"),
         )
-        
-        response = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=EXPERT_VALIDATIONS_PREFIX)
+
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET, Prefix=EXPERT_VALIDATIONS_PREFIX
+        )
         if "Contents" not in response:
             return set()
-        
+
         all_validations = []
         for obj in response["Contents"]:
             if obj["Key"].endswith(".csv"):
@@ -121,21 +144,25 @@ def get_validated_pro_clips(user_id):
                         mode="w+", suffix=".csv", delete=False
                     ) as temp_file:
                         try:
-                            s3_client.download_file(S3_BUCKET, obj["Key"], temp_file.name)
+                            s3_client.download_file(
+                                S3_BUCKET, obj["Key"], temp_file.name
+                            )
                             df = pd.read_csv(temp_file.name)
                             all_validations.append(df)
                         finally:
                             Path(temp_file.name).unlink()
-                except Exception:
+                except Exception as e:
+                    # Skip invalid CSV files during validation loading
+                    st.warning(f"Skipping invalid file {obj['Key']}: {e}")
                     continue
-        
+
         if not all_validations:
             return set()
-        
+
         combined_df = pd.concat(all_validations, ignore_index=True)
         filtered = combined_df[combined_df["userID"].astype(str) == str(user_id)]
-        return set(zip(filtered["filename"], filtered["start_time"]))
-        
+        return set(zip(filtered["filename"], filtered["start_time"], strict=False))
+
     except Exception:
         return set()
 
@@ -143,55 +170,69 @@ def get_validated_pro_clips(user_id):
 def _get_validated_clips_with_session(user_id):
     """Get all validated clips including session state."""
     validated_clips = get_validated_pro_clips(user_id)
-    if hasattr(st.session_state, 'expert_validated_clips_session'):
-        validated_clips = validated_clips.union(st.session_state.expert_validated_clips_session)
+    if hasattr(st.session_state, "expert_validated_clips_session"):
+        validated_clips = validated_clips.union(
+            st.session_state.expert_validated_clips_session
+        )
     return validated_clips
 
 
 def get_random_assigned_clip(user_id):
-    """Get next unvalidated clip for user using deterministic ordering (filename, start_time).
-    Returns dict with clip info, or dict with 'all_validated': True if all clips validated."""
+    """Get next unvalidated clip for user.
+    Uses deterministic ordering (filename, start_time).
+    Returns dict with clip info, or 'all_validated': True if done.
+    """
     conn = get_duckdb_connection()
     validated_clips = _get_validated_clips_with_session(user_id)
-    
+
     if validated_clips:
-        validated_tuples = [(filename, start_time) for filename, start_time in validated_clips]
+        validated_tuples = [
+            (filename, start_time) for filename, start_time in validated_clips
+        ]
         placeholders = ",".join(["(?, ?)" for _ in validated_tuples])
         exclusion_clause = f'AND (fullPath, "start time") NOT IN ({placeholders})'
-        exclusion_params = [item for filename, start_time in validated_tuples for item in [filename, start_time]]
+        exclusion_params = [
+            item
+            for filename, start_time in validated_tuples
+            for item in [filename, start_time]
+        ]
     else:
         exclusion_clause = ""
         exclusion_params = []
-    
+
     query = f"""
-    SELECT fullPath, deployment_id, "start time", "scientific name", confidence, "max uncertainty", userID
+    SELECT fullPath, deployment_id, "start time", "scientific name",
+           confidence, "max uncertainty", userID
     FROM '{EXPERT_PARQUET_DATASET}'
     WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
     {exclusion_clause}
     ORDER BY fullPath, "start time"
     LIMIT 1
     """
-    
+
     try:
         result = conn.execute(query, [user_id] + exclusion_params).fetchone()
-        
+
         if result:
             return {
-                "filename": result[0], "deployment_id": result[1], "start_time": result[2],
-                "species_array": result[3], "confidence_array": result[4], "uncertainty_array": result[5],
-                "userID": result[6], "all_validated": False
+                "filename": result[0],
+                "deployment_id": result[1],
+                "start_time": result[2],
+                "species_array": result[3],
+                "confidence_array": result[4],
+                "uncertainty_array": result[5],
+                "userID": result[6],
+                "all_validated": False,
             }
         else:
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)",
-                [user_id]
-            ).fetchone()[0]
-            
+            query = (
+                f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' "
+                "WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)"
+            )
+            total = conn.execute(query, [user_id]).fetchone()[0]
+
             if total > 0:
-                return {
-                    "all_validated": True,
-                    "total_clips": total
-                }
+                return {"all_validated": True, "total_clips": total}
             else:
                 return None
     except Exception as e:
@@ -201,21 +242,33 @@ def get_random_assigned_clip(user_id):
 
 @st.cache_data
 def get_remaining_pro_clips_count(user_id):
-    """Get count of remaining unvalidated clips for user. Uses DuckDB COUNT for performance."""
+    """Get count of remaining unvalidated clips for user.
+    Uses DuckDB COUNT for performance.
+    """
     conn = get_duckdb_connection()
     validated_clips = _get_validated_clips_with_session(user_id)
-    
+
     if validated_clips:
-        validated_tuples = [(filename, start_time) for filename, start_time in validated_clips]
+        validated_tuples = [
+            (filename, start_time) for filename, start_time in validated_clips
+        ]
         placeholders = ",".join(["(?, ?)" for _ in validated_tuples])
         exclusion_clause = f'AND (fullPath, "start time") NOT IN ({placeholders})'
-        exclusion_params = [item for filename, start_time in validated_tuples for item in [filename, start_time]]
+        exclusion_params = [
+            item
+            for filename, start_time in validated_tuples
+            for item in [filename, start_time]
+        ]
     else:
         exclusion_clause = ""
         exclusion_params = []
-    
-    query = f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR) {exclusion_clause}"
-    
+
+    query = (
+        f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' "
+        f"WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR) "
+        f"{exclusion_clause}"
+    )
+
     try:
         result = conn.execute(query, [user_id] + exclusion_params).fetchone()
         return result[0] if result else 0

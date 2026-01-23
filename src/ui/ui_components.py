@@ -1,21 +1,27 @@
 """Expert Mode UI Components."""
 
 import os
+
 import streamlit as st
+
 from ui.ui_utils import (
-    render_sidebar_logo, render_spectrogram, render_audio_player,
-    render_clip_metadata, render_all_validated_message, clear_cache_functions,
+    clear_cache_functions,
+    render_all_validated_message,
+    render_audio_player,
+    render_clip_metadata,
+    render_spectrogram,
 )
 
 
 def render_pro_page_header():
     """Render the Expert mode page header."""
-    st.title("🎓 TABMON Listening Lab - Expert Mode", text_alignment="center")
-    st.markdown("### Professional Species Annotation Tool", text_alignment="center")
+    st.title("🎓 TABMON Listening Lab - for Experts!", text_alignment="center")
     st.markdown(
-        "Welcome to the Expert annotation mode. You have been assigned specific clips "
+        "Welcome to the Expert annotation mode. "
+        "You have been assigned specific clips "
         "to annotate with detailed species identification. "
-        "Please carefully listen to each clip and select all species you can identify." \
+        "Please carefully listen to each clip and select "
+        "all species you can identify."
         "**Note that the app initialization may take a minute or two.**",
         text_alignment="center",
     )
@@ -23,8 +29,8 @@ def render_pro_page_header():
 
 def render_pro_help_section():
     """Render Expert mode help information."""
-    with st.expander("ℹ️ Expert Mode Instructions", expanded=False):
-        st.markdown("""### 📖 How to use Expert Mode
+    with st.expander("ℹ️ Instructions", expanded=False):
+        st.markdown("""### 📖 How to use this annotation platform
 
 **Annotation Process:**
 1. **Login** with your assigned User ID
@@ -52,11 +58,11 @@ def render_pro_help_section():
 def render_pro_clip_section(result, selections):
     """
     Render the Expert mode audio clip section.
-    
+
     Args:
         result: Dictionary containing clip information
         selections: Dictionary containing user selections
-        
+
     Returns:
         bool: True if clip was loaded successfully, False otherwise
     """
@@ -69,15 +75,17 @@ def render_pro_clip_section(result, selections):
     if result.get("all_validated"):
         render_all_validated_message(
             mode_name="assigned clips",
-            total_clips=result['total_clips'],
-            extra_message="Your annotation work is complete. Thank you for your contribution!"
+            total_clips=result["total_clips"],
+            extra_message=(
+                "Your annotation work is complete. Thank you for your contribution!"
+            ),
         )
         return False
 
     with st.container(border=True):
         st.markdown("### 🎵 Audio Clip")
 
-        filepath = result['filename'].replace('bugg_RpiID', 'bugg_RPiID')
+        filepath = result["filename"].replace("bugg_RpiID", "bugg_RPiID")
         full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
         clip = extract_clip(full_path, result["start_time"])
 
@@ -94,16 +102,17 @@ def render_pro_load_new_button():
     if st.button("🔄 Load Next Clip", help="Get the next assigned clip to annotate"):
         st.session_state.expert_current_clip = None
         st.session_state.expert_clip_params = None
-        
+
         from database.queries import (
-            get_validated_pro_clips,
             get_assigned_clips_for_user,
-            get_remaining_pro_clips_count
+            get_remaining_pro_clips_count,
+            get_validated_pro_clips,
         )
+
         clear_cache_functions(
             get_validated_pro_clips,
             get_assigned_clips_for_user,
-            get_remaining_pro_clips_count
+            get_remaining_pro_clips_count,
         )
         st.rerun()
 
@@ -112,9 +121,7 @@ def render_pro_empty_validation_placeholder():
     """Render placeholder when no Expert validation form should be shown."""
     with st.container(border=True):
         st.markdown("### 🎯 Expert Validation")
-        st.info(
-            "Please login with your User ID to access your assigned clips."
-        )
+        st.info("Please login with your User ID to access your assigned clips.")
 
 
 def render_pro_all_validated_placeholder():
