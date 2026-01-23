@@ -6,6 +6,7 @@ This module manages user input selections for Pro mode.
 
 import streamlit as st
 
+from config import LANGUAGE_MAPPING
 from queries import check_user_has_annotations
 from ui_utils import render_sidebar_logo
 
@@ -78,7 +79,21 @@ def get_pro_user_selections():
     st.sidebar.markdown("---")
     st.sidebar.info(f"👤 **User:** {user_id}")
     
+    # Language selector
+    selected_language = st.sidebar.selectbox(
+        "Species Name Language",
+        options=["Scientific Names"] + list(LANGUAGE_MAPPING.keys()),
+        help="Choose the language for species names",
+    )
+    
+    # Convert language selection to language code
+    if selected_language == "Scientific Names":
+        language_code = "Scientific_Name"
+    else:
+        language_code = LANGUAGE_MAPPING[selected_language]
+    
     return {
         "user_id": user_id,
         "confidence_threshold": 0.0,  # Default to 0.0, no longer configurable
+        "language_code": language_code,
     }

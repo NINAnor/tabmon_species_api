@@ -9,11 +9,48 @@ import streamlit as st
 from botocore.client import Config
 
 from config import (
+    BIRDNET_MULTILINGUAL_PATH,
     S3_ACCESS_KEY_ID,
     S3_BASE_URL,
     S3_ENDPOINT,
     S3_SECRET_ACCESS_KEY,
 )
+
+
+@st.cache_data
+def load_species_translations():
+    """Load the multilingual species name translations"""
+    return pd.read_csv(BIRDNET_MULTILINGUAL_PATH)
+
+
+def get_species_display_names(species_list, language_code):
+    """Convert scientific names to display names in selected language
+    
+    Args:
+        species_list: List of scientific names
+        language_code: Language code (e.g., 'en_uk', 'es', 'nl') or 'Scientific_Name'
+        
+    Returns:
+        Dictionary mapping display names to scientific names
+    """
+    if language_code == "Scientific_Name":
+        return {species: species for species in species_list}
+
+    translations_df = load_species_translations()
+    species_map = {}
+
+    for species in species_list:
+        translation_row = translations_df[translations_df["Scientific_Name"] == species]
+        if not translation_row.empty and language_code in translation_row.columns:
+            translated_name = translation_row[language_code].iloc[0]
+            if pd.notna(translated_name):
+                species_map[translated_name] = species
+            else:
+                species_map[species] = species  # Fallback to scientific name
+        else:
+            species_map[species] = species  # Fallback to scientific name
+
+    return species_map
 
 
 def extract_clip(s3_url, start_time, sr=48000):

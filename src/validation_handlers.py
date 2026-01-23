@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from queries import get_remaining_pro_clips_count, get_top_species_for_database
+from utils import get_species_display_names
 
 
 def render_pro_validation_form(result, selections, top_species):
@@ -75,14 +76,26 @@ def render_pro_validation_form(result, selections, top_species):
             # Sort by confidence (highest first)
             species_data.sort(key=lambda x: x[1], reverse=True)
             
+            # Get language code from selections
+            language_code = selections.get("language_code", "Scientific_Name")
+            
+            # Get translation mapping for detected species (display_name -> scientific_name)
+            scientific_names = [species for species, _, _ in species_data]
+            display_name_map = get_species_display_names(scientific_names, language_code)
+            
+            # Create reverse mapping (scientific_name -> display_name) for checkbox labels
+            scientific_to_display = {sci_name: disp_name for disp_name, sci_name in display_name_map.items()}
+            
             # Create checklist for detected species
             selected_species = []
             
-            # Display each detected species with its confidence
+            # Display each detected species with its confidence (using translated names)
             for idx, (species, conf_val, uncert_val) in enumerate(species_data):
-                label = f"{species} (Birdnet conf: {conf_val:.2f})"
+                display_name = scientific_to_display.get(species, species)
+                label = f"{display_name} (Birdnet conf: {conf_val:.2f})"
                 
                 if st.checkbox(label, key=f"species_{idx}"):
+                    # Store scientific name, not display name
                     selected_species.append(species)
             
             none_of_above = st.checkbox(

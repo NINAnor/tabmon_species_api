@@ -32,14 +32,15 @@ def get_or_load_pro_clip(selections):
     Get the current Pro mode clip or load a new one if needed.
     
     Args:
-        selections: Dictionary containing user selections
+        selections: Dictionary containing user selections (user_id, language_code)
         
     Returns:
         Dictionary containing clip information or None if no clips available
     """
     initialize_pro_session()
     
-    current_params = (selections["user_id"],)
+    # Include language_code in params to detect language changes
+    current_params = (selections["user_id"], selections.get("language_code", "Scientific_Name"))
 
     # If parameters changed, clear and reload
     if check_params_changed('pro_clip_params', current_params):

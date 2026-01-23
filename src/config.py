@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 # ============================================================================
 # S3 Configuration
@@ -22,3 +23,19 @@ PRO_VALIDATIONS_PREFIX = "validations_pro"
 
 # Pro Mode Settings
 PRO_TOP_SPECIES_COUNT = int(os.getenv("PRO_TOP_SPECIES_COUNT", "10"))
+
+# ============================================================================
+# Language Configuration
+# ============================================================================
+
+# Language mapping for species names
+LANGUAGE_MAPPING = {
+    "English": "en_uk",
+    "Spanish": "es",
+    "Dutch": "nl",
+    "Norwegian": "no",
+    "French": "fr",
+}
+
+# Path to multilingual species names CSV
+BIRDNET_MULTILINGUAL_PATH = Path(__file__).parent.parent / "assets" / "birdnet_multilingual.csv"
