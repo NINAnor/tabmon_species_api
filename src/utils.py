@@ -170,13 +170,17 @@ def save_pro_validation_response(validation_data):
 
         # Track validated clip in session state to avoid showing it again
         # without needing to clear caches and re-query
-        if 'pro_validated_in_session' not in st.session_state:
-            st.session_state.pro_validated_in_session = set()
+        if 'pro_validated_clips_session' not in st.session_state:
+            st.session_state.pro_validated_clips_session = set()
         
         clip_key = (validation_data["filename"], validation_data["start_time"])
-        st.session_state.pro_validated_in_session.add(clip_key)
+        st.session_state.pro_validated_clips_session.add(clip_key)
         
-        # Only clear count cache (lightweight) - keep validated_clips cache intact
+        # Decrement remaining count in session state (faster than re-querying)
+        if 'pro_remaining_count' in st.session_state and st.session_state.pro_remaining_count is not None:
+            st.session_state.pro_remaining_count = max(0, st.session_state.pro_remaining_count - 1)
+        
+        # Only clear count cache when needed (on next load it will refresh from DB)
         from queries import get_remaining_pro_clips_count
         get_remaining_pro_clips_count.clear()
         return True

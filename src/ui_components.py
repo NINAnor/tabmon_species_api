@@ -90,10 +90,10 @@ def render_pro_clip_section(result, selections):
     with st.container(border=True):
         st.markdown("### 🎵 Audio Clip")
 
-        with st.spinner("Loading audio clip..."):
-            filepath = result['filename'].replace('bugg_RpiID', 'bugg_RPiID')
-            full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
-            clip = extract_clip(full_path, result["start_time"])
+        # Extract clip (cached, so spinner only shows on first load)
+        filepath = result['filename'].replace('bugg_RpiID', 'bugg_RPiID')
+        full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
+        clip = extract_clip(full_path, result["start_time"])
 
         # Show number of species detected
         render_clip_metadata(

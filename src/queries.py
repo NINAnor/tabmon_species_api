@@ -123,10 +123,11 @@ def get_assigned_clips_for_user(user_id):
     return clips
 
 
-@st.cache_data
+@st.cache_data(ttl=300)  # Cache per user_id
 def get_validated_pro_clips(user_id):
     """
     Get clips that have already been validated by this user.
+    Cache is automatically keyed by user_id parameter.
     
     Args:
         user_id: The user's ID
@@ -196,16 +197,16 @@ def _get_validated_clips_with_session(user_id):
     validated_clips = get_validated_pro_clips(user_id)
     
     # Add clips validated in current session
-    if hasattr(st.session_state, 'pro_validated_in_session'):
-        validated_clips = validated_clips.union(st.session_state.pro_validated_in_session)
+    if hasattr(st.session_state, 'pro_validated_clips_session'):
+        validated_clips = validated_clips.union(st.session_state.pro_validated_clips_session)
     
     return validated_clips
 
 
 def get_random_assigned_clip(user_id):
     """
-    Get a random unvalidated clip assigned to the user.
-    Uses DuckDB for filtering and random selection (faster than Python).
+    Get next unvalidated clip assigned to the user.
+    Uses deterministic ordering (filename, start_time) for faster queries.
     
     Args:
         user_id: The user's ID
@@ -236,7 +237,8 @@ def get_random_assigned_clip(user_id):
         exclusion_clause = ""
         exclusion_params = []
     
-    # Query for random unvalidated clip - DuckDB does filtering + random selection
+    # Query for next unvalidated clip - use deterministic ordering for speed
+    # ORDER BY filename, start_time is much faster than random()
     query = f"""
     SELECT 
         fullPath as filename,
@@ -249,7 +251,7 @@ def get_random_assigned_clip(user_id):
     FROM '{PRO_PARQUET_DATASET}'
     WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
     {exclusion_clause}
-    ORDER BY random()
+    ORDER BY fullPath, "start time"
     LIMIT 1
     """
     

@@ -36,16 +36,15 @@ def render_pro_validation_form(result, selections):
     with st.container(border=True):
         st.markdown("### 🎯 Pro Validation")
 
-        # Show remaining clips count
-        remaining_clips = get_remaining_pro_clips_count(
-            selections["user_id"],
-        )
-        if remaining_clips > 0:
-            st.info(
-                f"📊 Still **{remaining_clips}** clips to annotate"
-            )
-        else:
-            st.success("🎉 All clips validated!")
+        # Show remaining clips count from session state (updated on validation)
+        if 'pro_remaining_count' in st.session_state and st.session_state.pro_remaining_count is not None:
+            remaining_clips = st.session_state.pro_remaining_count
+            if remaining_clips > 0:
+                st.info(
+                    f"📊 Still **{remaining_clips}** clips to annotate"
+                )
+            else:
+                st.success("🎉 All clips validated!")
 
         with st.form("pro_validation_form"):
             st.markdown(f"#### Species detected by BirdNET in this clip:")

@@ -17,7 +17,9 @@ def initialize_pro_session():
         'current_clip': None,
         'clip_params': None,
         'authenticated': False,
-        'user_id': None
+        'user_id': None,
+        'validated_clips_session': set(),  # Track validated clips in current session
+        'remaining_count': None  # Cache remaining count to avoid repeated queries
     })
 
 
@@ -25,6 +27,13 @@ def clear_pro_clip_state():
     """Clear all Pro mode clip-related state variables."""
     st.session_state.pro_current_clip = None
     st.session_state.pro_clip_params = None
+    st.session_state.pro_validated_clips_session = set()  # Clear session validations
+    st.session_state.pro_remaining_count = None  # Reset remaining count
+    
+    # Clear caches when switching users to avoid showing wrong data
+    from queries import get_validated_pro_clips, get_remaining_pro_clips_count
+    get_validated_pro_clips.clear()
+    get_remaining_pro_clips_count.clear()
 
 
 def get_or_load_pro_clip(selections):
@@ -49,6 +58,11 @@ def get_or_load_pro_clip(selections):
 
     # If current clip is None, get new clip
     if st.session_state.pro_current_clip is None:
+        # Initialize remaining count on first load
+        if st.session_state.pro_remaining_count is None:
+            from queries import get_remaining_pro_clips_count
+            st.session_state.pro_remaining_count = get_remaining_pro_clips_count(selections["user_id"])
+        
         st.session_state.pro_current_clip = get_random_assigned_clip(
             selections["user_id"],
         )
