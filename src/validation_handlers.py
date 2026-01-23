@@ -10,7 +10,30 @@ import pandas as pd
 import streamlit as st
 
 from queries import get_remaining_pro_clips_count, get_top_species_for_database
-from utils import get_species_display_names
+from utils import get_species_display_names, load_species_translations
+
+
+@st.cache_data
+def _get_all_species_list(language_code="Scientific_Name"):
+    """Get all species names for autocomplete.
+    Returns list of species names in the selected language."""
+    translations_df = load_species_translations()
+    
+    if language_code == "Scientific_Name":
+        return sorted(translations_df["Scientific_Name"].dropna().tolist())
+    elif language_code in translations_df.columns:
+        # Get translated names with fallback to scientific names
+        species_list = []
+        for _, row in translations_df.iterrows():
+            sci_name = row["Scientific_Name"]
+            translated = row.get(language_code)
+            if pd.notna(translated):
+                species_list.append(f"{translated} ({sci_name})")
+            else:
+                species_list.append(sci_name)
+        return sorted(species_list)
+    else:
+        return sorted(translations_df["Scientific_Name"].dropna().tolist())
 
 
 @st.cache_data(show_spinner=False)
@@ -106,11 +129,17 @@ def render_pro_validation_form(result, selections):
             
             st.markdown("---")
             
-            # Additional species input for species not in top 10
-            other_species = st.text_input(
+            # Get all available species for autocomplete
+            language_code = selections.get("language_code", "Scientific_Name")
+            all_species = _get_all_species_list(language_code)
+            
+            # Additional species input with autocomplete (multiselect)
+            other_species_list = st.multiselect(
                 "**Other species not listed above:**",
-                placeholder="e.g., Parus major, Sturnus vulgaris",
-                help="Enter additional species names separated by commas"
+                options=all_species,
+                default=[],
+                help="Search and select additional species not in the checklist above",
+                placeholder="Start typing to search..."
             )
             
             # Notes/comments field
@@ -138,14 +167,14 @@ def render_pro_validation_form(result, selections):
                     result,
                     selections,
                     selected_species,
-                    other_species,
+                    other_species_list,
                     user_notes,
                     user_confidence
                 )
 
 
 def _handle_pro_validation_submission(
-    result, selections, selected_species, other_species, 
+    result, selections, selected_species, other_species_list, 
     user_notes, user_confidence
 ):
     """
@@ -155,7 +184,7 @@ def _handle_pro_validation_submission(
         result: Dictionary containing clip information
         selections: Dictionary containing user selections
         selected_species: List of selected species from checklist
-        other_species: String of additional species names
+        other_species_list: List of additional species from multiselect
         user_notes: User's notes/comments
         user_confidence: User's confidence level
     """
@@ -164,10 +193,16 @@ def _handle_pro_validation_submission(
         st.error("Please rate your confidence before submitting.")
         return
     
-    # Parse other species if provided
+    # Parse other species from multiselect (extract scientific names)
     additional_species = []
-    if other_species:
-        additional_species = [s.strip() for s in other_species.split(",") if s.strip()]
+    for species_str in other_species_list:
+        # If format is "Common Name (Scientific Name)", extract scientific name
+        if " (" in species_str and species_str.endswith(")"):
+            scientific_name = species_str.split(" (")[-1].rstrip(")")
+            additional_species.append(scientific_name)
+        else:
+            # Already a scientific name
+            additional_species.append(species_str)
     
     # Combine all identified species
     all_identified_species = selected_species + additional_species
