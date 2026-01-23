@@ -1,9 +1,4 @@
-"""
-Pro Mode Validation Handlers
-
-This module handles the validation form for Pro mode, which uses
-a checklist of the top 10 species instead of a simple Yes/No response.
-"""
+"""Expert Mode Validation Handlers - checklist of top species."""
 
 import ast
 import pandas as pd
@@ -15,25 +10,18 @@ from utils import get_species_display_names, load_species_translations
 
 @st.cache_data
 def _get_all_species_list(language_code="Scientific_Name"):
-    """Get all species names for autocomplete.
-    Returns list of species names in the selected language."""
+    """Get species names for autocomplete in selected language."""
     translations_df = load_species_translations()
     
-    if language_code == "Scientific_Name":
+    if language_code == "Scientific_Name" or language_code not in translations_df.columns:
         return sorted(translations_df["Scientific_Name"].dropna().tolist())
-    elif language_code in translations_df.columns:
-        # Get translated names with fallback to scientific names
-        species_list = []
-        for _, row in translations_df.iterrows():
-            sci_name = row["Scientific_Name"]
-            translated = row.get(language_code)
-            if pd.notna(translated):
-                species_list.append(f"{translated} ({sci_name})")
-            else:
-                species_list.append(sci_name)
-        return sorted(species_list)
-    else:
-        return sorted(translations_df["Scientific_Name"].dropna().tolist())
+    
+    species_list = [
+        f"{row[language_code]} ({row['Scientific_Name']})" if pd.notna(row.get(language_code))
+        else row["Scientific_Name"]
+        for _, row in translations_df.iterrows()
+    ]
+    return sorted(species_list)
 
 
 @st.cache_data(show_spinner=False)
@@ -50,71 +38,48 @@ def _parse_array_string(array_str):
 
 def render_pro_validation_form(result, selections):
     """
-    Render the Pro mode validation form with species checklist.
+    Render the Expert mode validation form with species checklist.
     
     Args:
         result: Dictionary containing clip information
         selections: Dictionary containing user selections
     """
     with st.container(border=True):
-        st.markdown("### 🎯 Pro Validation")
+        st.markdown("### 🎯 Expert Validation")
 
-        # Show remaining clips count from session state (updated on validation)
-        if 'pro_remaining_count' in st.session_state and st.session_state.pro_remaining_count is not None:
-            remaining_clips = st.session_state.pro_remaining_count
-            if remaining_clips > 0:
-                st.info(
-                    f"📊 Still **{remaining_clips}** clips to annotate"
-                )
-            else:
-                st.success("🎉 All clips validated!")
+        # Show remaining clips count from session state
+        if 'expert_remaining_count' in st.session_state and st.session_state.expert_remaining_count is not None:
+            remaining = st.session_state.expert_remaining_count
+            st.success("🎉 All clips validated!") if remaining == 0 else st.info(f"📊 Still **{remaining}** clips to annotate")
 
-        with st.form("pro_validation_form"):
-            st.markdown(f"#### Species detected by BirdNET in this clip:")
+        with st.form("expert_validation_form"):
+            st.markdown("#### Species detected by BirdNET in this clip:")
             st.markdown("**Select which species you can actually hear:**")
             st.markdown("---")
             
-            # Get the detected species arrays
+            # Parse and sort species by confidence (descending)
             species_list = _parse_array_string(result.get('species_array', []))
             confidence_list = _parse_array_string(result.get('confidence_array', []))
             uncertainty_list = _parse_array_string(result.get('uncertainty_array', []))
             
-            # Create list of tuples (species, confidence, uncertainty) and sort by confidence (descending)
-            species_data = []
-            for idx, species in enumerate(species_list):
-                confidence = confidence_list[idx] if idx < len(confidence_list) else 0.0
-                uncertainty = uncertainty_list[idx] if idx < len(uncertainty_list) else 0.0
-                try:
-                    conf_val = float(confidence)
-                    uncert_val = float(uncertainty)
-                except (ValueError, TypeError):
-                    conf_val = 0.0
-                    uncert_val = 0.0
-                species_data.append((species, conf_val, uncert_val))
+            species_data = sorted([
+                (species, 
+                 float(confidence_list[idx]) if idx < len(confidence_list) else 0.0,
+                 float(uncertainty_list[idx]) if idx < len(uncertainty_list) else 0.0)
+                for idx, species in enumerate(species_list)
+            ], key=lambda x: x[1], reverse=True)
             
-            # Sort by confidence (highest first)
-            species_data.sort(key=lambda x: x[1], reverse=True)
-            
-            # Get language code from selections
+            # Get translations
             language_code = selections.get("language_code", "Scientific_Name")
-            
-            # Get translation mapping for detected species (display_name -> scientific_name)
             scientific_names = [species for species, _, _ in species_data]
             display_name_map = get_species_display_names(scientific_names, language_code)
+            scientific_to_display = {sci: disp for disp, sci in display_name_map.items()}
             
-            # Create reverse mapping (scientific_name -> display_name) for checkbox labels
-            scientific_to_display = {sci_name: disp_name for disp_name, sci_name in display_name_map.items()}
-            
-            # Create checklist for detected species
+            # Display checklist
             selected_species = []
-            
-            # Display each detected species with its confidence (using translated names)
-            for idx, (species, conf_val, uncert_val) in enumerate(species_data):
+            for idx, (species, conf_val, _) in enumerate(species_data):
                 display_name = scientific_to_display.get(species, species)
-                label = f"{display_name} (Birdnet conf: {conf_val:.2f})"
-                
-                if st.checkbox(label, key=f"species_{idx}"):
-                    # Store scientific name, not display name
+                if st.checkbox(f"{display_name} (Birdnet conf: {conf_val:.2f})", key=f"species_{idx}"):
                     selected_species.append(species)
             
             none_of_above = st.checkbox(
@@ -123,7 +88,6 @@ def render_pro_validation_form(result, selections):
                 help="Check this if you cannot hear any of the species listed above"
             )
             
-            # If "None of the above" is checked, clear selected species and add marker
             if none_of_above:
                 selected_species = ["NONE_DETECTED"]
             
@@ -173,38 +137,19 @@ def render_pro_validation_form(result, selections):
                 )
 
 
-def _handle_pro_validation_submission(
-    result, selections, selected_species, other_species_list, 
-    user_notes, user_confidence
-):
-    """
-    Handle Pro mode validation form submission.
-    
-    Args:
-        result: Dictionary containing clip information
-        selections: Dictionary containing user selections
-        selected_species: List of selected species from checklist
-        other_species_list: List of additional species from multiselect
-        user_notes: User's notes/comments
-        user_confidence: User's confidence level
-    """
-    # Validation: require at least confidence rating
+def _handle_pro_validation_submission(result, selections, selected_species, other_species_list, user_notes, user_confidence):
+    """Handle Expert mode validation form submission."""
     if not user_confidence:
         st.error("Please rate your confidence before submitting.")
         return
     
-    # Parse other species from multiselect (extract scientific names)
-    additional_species = []
-    for species_str in other_species_list:
-        # If format is "Common Name (Scientific Name)", extract scientific name
-        if " (" in species_str and species_str.endswith(")"):
-            scientific_name = species_str.split(" (")[-1].rstrip(")")
-            additional_species.append(scientific_name)
-        else:
-            # Already a scientific name
-            additional_species.append(species_str)
+    # Extract scientific names from multiselect (format: "Common Name (Scientific Name)")
+    additional_species = [
+        species_str.split(" (")[-1].rstrip(")") if " (" in species_str and species_str.endswith(")")
+        else species_str
+        for species_str in other_species_list
+    ]
     
-    # Combine all identified species
     all_identified_species = selected_species + additional_species
     
     # Prepare validation data
@@ -212,8 +157,8 @@ def _handle_pro_validation_submission(
         "filename": result["filename"],
         "userID": selections["user_id"],
         "deployment_id": result.get("deployment_id", ""),
-        "birdnet_species_detected": result.get("species_array", []),  # Array of what BirdNET detected
-        "birdnet_confidences": result.get("confidence_array", []),  # Array of confidences
+        "birdnet_species_detected": result.get("species_array", []),
+        "birdnet_confidences": result.get("confidence_array", []),
         "birdnet_uncertainties": result.get("uncertainty_array", []),  # Array of uncertainties
         "start_time": result["start_time"],
         "identified_species": all_identified_species,  # List of species user confirmed/added
@@ -228,7 +173,7 @@ def _handle_pro_validation_submission(
     save_pro_validation_response(validation_data)
     
     # Clear current clip to force loading a new one
-    st.session_state.pro_current_clip = None
+    st.session_state.expert_current_clip = None
     
     st.success("✅ Thank you for your annotation!")
     st.rerun()

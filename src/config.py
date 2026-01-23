@@ -12,17 +12,17 @@ S3_BUCKET = os.getenv("S3_BUCKET")
 S3_BASE_URL = f"s3://{S3_BUCKET}"
 
 # ============================================================================
-# Pro Mode Configuration
+# Expert Mode Configuration
 # ============================================================================
 
-# Pro mode dataset (with userID field)
-PRO_PARQUET_DATASET = f"{S3_BASE_URL}/test_pro_annotations.parquet"
+# Expert mode dataset (with userID field)
+EXPERT_PARQUET_DATASET = f"{S3_BASE_URL}/test_pro_annotations.parquet"
 
-# Pro mode validations stored in: validations_pro/session_{session_id}.csv
-PRO_VALIDATIONS_PREFIX = "validations_pro"
+# Expert mode validations stored in: validations_expert/session_{session_id}.csv
+EXPERT_VALIDATIONS_PREFIX = "validations_expert"
 
-# Pro Mode Settings
-PRO_TOP_SPECIES_COUNT = int(os.getenv("PRO_TOP_SPECIES_COUNT", "10"))
+# Expert Mode Settings
+EXPERT_TOP_SPECIES_COUNT = int(os.getenv("EXPERT_TOP_SPECIES_COUNT", "10"))
 
 # ============================================================================
 # Language Configuration

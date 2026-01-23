@@ -1,8 +1,8 @@
 """
-TABMON Listening Lab - Pro Mode Application
+TABMON Listening Lab - Expert Mode Application
 
-This is the main entry point for the TABMON Pro Species Validation Tool.
-Pro mode is designed for assigned annotation tasks with user authentication.
+This is the main entry point for the TABMON Expert Species Validation Tool.
+Expert mode is designed for assigned annotation tasks with user authentication.
 """
 
 import streamlit as st
@@ -22,12 +22,12 @@ from queries import get_top_species_for_database
 
 
 def main():
-    """Main application entry point for Pro mode."""
+    """Main application entry point for Expert mode."""
     
     # Setup page configuration
     setup_page_config()
     
-    # Initialize Pro session
+    # Initialize Expert session
     initialize_pro_session()
     render_pro_page_header()
     render_pro_help_section()
