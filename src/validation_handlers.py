@@ -15,7 +15,7 @@ from utils import save_validation_response
 def render_validation_form(result, selections):
     """
     Render the validation form and handle submission.
-    
+
     Args:
         result: Dictionary containing clip information
         selections: Dictionary containing user selections
@@ -78,7 +78,11 @@ def render_validation_form(result, selections):
 
         if submitted:
             _handle_validation_submission(
-                result, selections, validation_response, user_validation, user_confidence
+                result,
+                selections,
+                validation_response,
+                user_validation,
+                user_confidence,
             )
 
 
@@ -87,7 +91,7 @@ def _handle_validation_submission(
 ):
     """
     Handle validation form submission.
-    
+
     Args:
         result: Dictionary containing clip information
         selections: Dictionary containing user selections

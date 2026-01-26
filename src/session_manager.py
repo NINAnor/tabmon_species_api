@@ -16,16 +16,16 @@ def initialize_session():
     """Initialize session state variables if they don't exist."""
     if "session_id" not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())[:8]
-    
+
     if "current_clip" not in st.session_state:
         st.session_state.current_clip = None
-    
+
     if "clip_params" not in st.session_state:
         st.session_state.clip_params = None
-    
+
     if "clip_queue" not in st.session_state:
         st.session_state.clip_queue = []
-    
+
     if "species_initialized" not in st.session_state:
         st.session_state.species_initialized = False
 
@@ -40,17 +40,18 @@ def clear_clip_state():
 def get_or_load_clip(selections):
     """
     Get the current clip or load a new one if needed.
-    
+
     Manages clip queue and parameter tracking to avoid unnecessary reloads.
-    
+
     Args:
-        selections: Dictionary containing user selections (country, device, species, etc.)
-        
+        selections: Dictionary containing user selections
+                    (country, device, species, etc.)
+
     Returns:
         Dictionary containing clip information or None if no clips available
     """
     initialize_session()
-    
+
     current_params = (
         selections["country"],
         selections["device"],

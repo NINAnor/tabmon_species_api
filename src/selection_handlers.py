@@ -17,7 +17,6 @@ from queries import (
 )
 from utils import get_species_display_names, match_device_id_to_site
 
-
 # Common species that are present across most habitats
 COMMON_SPECIES = [
     "Corvus corone",
@@ -33,7 +32,7 @@ COMMON_SPECIES = [
 def get_user_selections():
     """
     Render sidebar controls and collect user selections.
-    
+
     Returns:
         Dictionary containing all user selections:
         - language: Selected language for species names
@@ -45,7 +44,7 @@ def get_user_selections():
         - confidence_threshold: Minimum confidence threshold
     """
     from ui_components import render_sidebar_logo
-    
+
     render_sidebar_logo()
     st.sidebar.header("🔍 Select the parameters")
 
@@ -61,7 +60,8 @@ def get_user_selections():
     selected_country = st.sidebar.selectbox("Select Country", countries)
 
     # Site selection
-    devices = get_sites_for_country(selected_country)
+    with st.spinner(f"Loading sites for {selected_country}..."):
+        devices = get_sites_for_country(selected_country)
     device_site_mapping = match_device_id_to_site(SITE_INFO_S3_PATH)
 
     filtered_sites = {}
@@ -77,6 +77,14 @@ def get_user_selections():
 
     # Species selection with translation
     detected_species = get_species_for_site(selected_country, selected_device)
+
+    # Check if site has data
+    if not detected_species:
+        st.sidebar.warning(
+            f"⚠️ No data available for site '{selected_site_name}'. "
+            "Please select a different site."
+        )
+        return None
 
     if selected_language == "Scientific Names":
         species_display_map = {species: species for species in detected_species}

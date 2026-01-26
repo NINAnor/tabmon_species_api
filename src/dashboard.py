@@ -7,15 +7,15 @@ It orchestrates the UI components, session management, and user interactions.
 
 import streamlit as st
 
-from session_manager import initialize_session, get_or_load_clip
 from selection_handlers import get_user_selections
+from session_manager import get_or_load_clip, initialize_session
 from ui_components import (
-    setup_page_config,
-    render_page_header,
-    render_help_section,
+    render_all_validated_placeholder,
     render_clip_section,
     render_empty_validation_placeholder,
-    render_all_validated_placeholder,
+    render_help_section,
+    render_page_header,
+    setup_page_config,
 )
 from validation_handlers import render_validation_form
 
@@ -24,7 +24,7 @@ def main():
     """Main application entry point."""
     # Initialize session state
     initialize_session()
-    
+
     # Setup page configuration and render header
     setup_page_config()
     render_page_header()
@@ -32,6 +32,10 @@ def main():
 
     # Get user selections from sidebar
     selections = get_user_selections()
+
+    # If no selections (e.g., no data for site), stop here
+    if not selections:
+        return
 
     st.markdown("---")
 
@@ -55,4 +59,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

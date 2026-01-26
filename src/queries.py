@@ -2,8 +2,8 @@ import duckdb
 import streamlit as st
 
 from config import (
-    PARQUET_DATASET,
     S3_ACCESS_KEY_ID,
+    S3_BASE_URL,
     S3_ENDPOINT,
     S3_SECRET_ACCESS_KEY,
     SITE_INFO_S3_PATH,
@@ -33,86 +33,112 @@ def get_duckdb_connection():
     return conn
 
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_site_info():
     conn = get_duckdb_connection()
     return conn.execute(f"SELECT * FROM '{SITE_INFO_S3_PATH}'").df()
 
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def get_available_countries():
     conn = get_duckdb_connection()
     query = f"""
-    SELECT DISTINCT country
-    FROM '{PARQUET_DATASET}'
-    ORDER BY country
+    SELECT DISTINCT Country
+    FROM '{SITE_INFO_S3_PATH}'
+    WHERE Country IS NOT NULL
+    ORDER BY Country
     """
     result = conn.execute(query).fetchall()
     return [row[0] for row in result]
 
 
-@st.cache_data
+@st.cache_data(ttl=3600, show_spinner="Loading sites...")
 def get_sites_for_country(country):
     conn = get_duckdb_connection()
     query = f"""
-    SELECT DISTINCT device_id
-    FROM '{PARQUET_DATASET}'
-    WHERE country = ?
-    ORDER BY device_id
+    SELECT DISTINCT DeviceID
+    FROM '{SITE_INFO_S3_PATH}'
+    WHERE Country = ?
+    ORDER BY DeviceID
     """
     result = conn.execute(query, [country]).fetchall()
     return [row[0] for row in result]
 
 
-@st.cache_data
+@st.cache_data(ttl=600, show_spinner="Loading species...")
 def get_species_for_site(country, device_id):
     conn = get_duckdb_connection()
+    # Use Hive partitioning path structure
+    targeted_pattern = (
+        f"{S3_BASE_URL}/merged_predictions_light/"
+        f"country={country}/device_id={device_id}/*.parquet"
+    )
     query = f"""
-    SELECT "scientific name"
-    FROM '{PARQUET_DATASET}'
-    WHERE country = ? AND device_id = ?
+    SELECT "scientific name", COUNT(*) as cnt
+    FROM '{targeted_pattern}'
     GROUP BY "scientific name"
-    HAVING COUNT(*) >= 5
+    HAVING cnt >= 5
     ORDER BY "scientific name"
     """
-    result = conn.execute(query, [country, device_id]).fetchall()
-    return [row[0] for row in result]
+    try:
+        result = conn.execute(query).fetchall()
+        return [row[0] for row in result]
+    except Exception:
+        return []
 
 
 def get_audio_files_for_species(country, device_id, species):
     conn = get_duckdb_connection()
+    # Use Hive partitioning path structure
+    targeted_pattern = (
+        f"{S3_BASE_URL}/merged_predictions_light/"
+        f"country={country}/device_id={device_id}/*.parquet"
+    )
     query = f"""
     SELECT filename
-    FROM '{PARQUET_DATASET}'
-    WHERE country = ? AND device_id = ? AND "scientific name" = ?
+    FROM '{targeted_pattern}'
+    WHERE "scientific name" = ?
     LIMIT 10
     """
-    result = conn.execute(query, [country, device_id, species]).fetchall()
-    return [row[0] for row in result]
+    try:
+        result = conn.execute(query, [species]).fetchall()
+        return [row[0] for row in result]
+    except Exception:
+        return []
 
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=3600, show_spinner="Extracting the species at the selected site")
 def get_all_clips_for_species(country, device_id, species, confidence_threshold=0.0):
     """Get all clips for a species/location combination with confidence filtering.
     Returns tuple of (all_clips_data, total_count) for efficient processing.
     """
     conn = get_duckdb_connection()
+    # Use Hive partitioning path structure
+    targeted_pattern = (
+        f"{S3_BASE_URL}/merged_predictions_light/"
+        f"country={country}/device_id={device_id}/*.parquet"
+    )
     query = f"""
     SELECT filename, "start time", confidence
-    FROM '{PARQUET_DATASET}'
-    WHERE country = ? AND device_id = ? AND "scientific name" = ? AND confidence >= ?
-    ORDER BY confidence DESC  -- Order by confidence instead of random for consistency
+    FROM '{targeted_pattern}'
+    WHERE "scientific name" = ? AND confidence >= ?
+    ORDER BY confidence DESC
     """
-    results = conn.execute(
-        query, [country, device_id, species, confidence_threshold]
-    ).fetchall()
+    try:
+        results = conn.execute(query, [species, confidence_threshold]).fetchall()
 
-    clips_data = [
-        {"filename": result[0], "start_time": result[1], "confidence": result[2]}
-        for result in results
-    ]
+        clips_data = [
+            {
+                "filename": result[0],
+                "start_time": result[1],
+                "confidence": result[2],
+            }
+            for result in results
+        ]
 
-    return clips_data, len(results)
+        return clips_data, len(results)
+    except Exception:
+        return [], 0
 
 
 def get_random_detection_clip(country, device_id, species, confidence_threshold=0.0):

@@ -77,11 +77,11 @@ def render_help_section():
 def render_clip_section(result, selections):
     """
     Render the audio clip section with player and metadata.
-    
+
     Args:
         result: Dictionary containing clip information
         selections: Dictionary containing user selections
-        
+
     Returns:
         bool: True if clip was loaded successfully, False otherwise
     """
@@ -172,10 +172,7 @@ def render_empty_validation_placeholder():
     """Render placeholder message when no validation form should be shown."""
     with st.container(border=True):
         st.markdown("### 🎯 Validation")
-        st.info(
-            "Select your parameters and an audio clip will appear for "
-            "validation."
-        )
+        st.info("Select your parameters and an audio clip will appear for validation.")
 
 
 def render_all_validated_placeholder():

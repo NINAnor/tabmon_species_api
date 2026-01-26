@@ -247,12 +247,15 @@ def get_validated_clips(country, device_id, species):
         return set()
 
 
+@st.cache_data(ttl=3600)
 def match_device_id_to_site(site_info_s3_path):
     # Use DuckDB to read from S3 instead of pandas directly
     from queries import get_duckdb_connection
 
     conn = get_duckdb_connection()
-    site_info_df = conn.execute(f"SELECT * FROM '{site_info_s3_path}'").df()
+    site_info_df = conn.execute(
+        f"SELECT DeviceID, Site FROM '{site_info_s3_path}'"
+    ).df()
 
     device_site_map = {}
     for _, row in site_info_df.iterrows():
