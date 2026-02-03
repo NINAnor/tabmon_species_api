@@ -137,12 +137,26 @@ def render_pro_validation_form(result, selections):
                 placeholder="Start typing to search...",
             )
 
+            st.markdown("---")
+
             # Notes/comments field
-            user_notes = st.text_area(
-                "**Additional notes or observations:**",
-                placeholder="e.g., background noise, quality issues, uncertainty...",
-                help="Optional: Add any relevant notes about this clip",
-            )
+            user_notes = []
+            noise_classes = [
+                "Rain",
+                "Wind",
+                "Traffic/Car",
+                "Human Voices",
+                "Aircraft",
+                "Dog/Bark",
+                "Insect/Cricket",
+                "Construction",
+            ]
+            for noise in noise_classes:
+                if st.checkbox(
+                    noise,
+                    key=f"{noise}",
+                ):
+                    user_notes.append(noise)
 
             # Confidence rating
             user_confidence = st.radio(

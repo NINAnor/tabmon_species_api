@@ -70,41 +70,6 @@ def create_confidence_bins(confidence_values, bin_size=0.1):
     return pd.cut(confidence_values, bins=bins, labels=bin_labels, include_lowest=True)
 
 
-def explode_species_detections(df):
-    """
-    Explode the aggregated species arrays into individual rows.
-    Each row will have one species with its corresponding confidence.
-    """
-    exploded_rows = []
-    
-    for idx, row in df.iterrows():
-        species_list = row["scientific name"]
-        confidence_list = row["confidence"]
-        uncertainty_list = row["max uncertainty"]
-        
-        # Handle case where these might be strings or lists
-        if isinstance(species_list, str):
-            import ast
-            species_list = ast.literal_eval(species_list)
-            confidence_list = ast.literal_eval(confidence_list)
-            uncertainty_list = ast.literal_eval(uncertainty_list) if isinstance(uncertainty_list, str) else uncertainty_list
-        
-        # Create a row for each species detection
-        for i, species in enumerate(species_list):
-            exploded_rows.append({
-                "filename": row["filename"],
-                "deployment_id": row["deployment_id"],
-                "fullPath": row["fullPath"],
-                "start time": row["start time"],
-                "scientific name": species,
-                "confidence": confidence_list[i] if i < len(confidence_list) else 0.0,
-                "max uncertainty": uncertainty_list if not isinstance(uncertainty_list, list) else (uncertainty_list[i] if i < len(uncertainty_list) else 0.0),
-                "userID": row.get("userID", np.nan)
-            })
-    
-    return pd.DataFrame(exploded_rows)
-
-
 def subsample_segments_by_target_species_confidence(df, target_species, samples_per_bin=50, bin_size=0.1, random_seed=42):
     """
     Subsample segments by the confidence of target species detections.
@@ -214,26 +179,6 @@ def assign_user_ids(df, user_ids):
         print(f"    {user_id}: {count:,} clips ({percentage:.1f}%)")
     
     return df
-
-
-def aggregate_back_to_segments(df):
-    """
-    Re-aggregate the subsampled individual detections back to segment format.
-    Groups by (filename, deployment_id, start time) and creates arrays.
-    """
-    grouped = df.groupby(["filename", "deployment_id", "fullPath", "start time", "userID"]).agg({
-        "scientific name": lambda x: list(x),
-        "confidence": lambda x: list(x),
-        "max uncertainty": "first"  # Take first since it's the same for all in segment
-    }).reset_index()
-    
-    # Rename columns to match expected format
-    grouped = grouped.rename(columns={
-        "scientific name": "scientific name",
-        "confidence": "confidence"
-    })
-    
-    return grouped
 
 
 def load_and_filter_segments_with_duckdb(s3_bucket, input_prefix, target_species, target_sites=None):
@@ -432,34 +377,6 @@ def main():
         print("\n❌ No segments found containing target species. Exiting.")
         return
     
-    # Count total species detections across all segments
-    print(f"\n  Analyzing segment contents...")
-    all_species = set()
-    target_species_counts = {species: 0 for species in args.species}
-    
-    for idx, row in df_segments.iterrows():
-        species_list = row["scientific name"]
-        if isinstance(species_list, str):
-            import ast
-            species_list = ast.literal_eval(species_list)
-        all_species.update(species_list)
-        for species in args.species:
-            if species in species_list:
-                target_species_counts[species] += 1
-    
-    print(f"  → Segments contain {len(all_species)} unique species total")
-    print(f"\n  Target species occurrence in segments:")
-    for species, count in target_species_counts.items():
-        print(f"    • {species}: appears in {count:,} segments")
-    
-    if args.sites:
-        print(f"\n  Deployment breakdown:")
-        site_counts = df_segments["deployment_id"].value_counts()
-        for site, count in site_counts.head(10).items():
-            print(f"    • {site}: {count:,} segments")
-        if len(site_counts) > 10:
-            print(f"    ... and {len(site_counts) - 10} more sites")
-    
     # Subsample segments by target species confidence bins
     print(f"\n[2/4] Subsampling segments by target species confidence bins...")
     df_sampled = subsample_segments_by_target_species_confidence(
@@ -484,19 +401,12 @@ def main():
     else:
         df_sampled["userID"] = np.nan
     
-    df_final = df_sampled
-    
-    # Ensure correct column order - keep arrays!
+    # Ensure correct column order
     column_order = [
         "filename", "deployment_id", "fullPath", "start time",
         "scientific name", "confidence", "max uncertainty", "userID"
     ]
-    df_final = df_final[[col for col in column_order if col in df_final.columns]]
-    
-    print(f"\n  ℹ️  Final data structure:")
-    print(f"     • Segments: {len(df_final):,}")
-    print(f"     • Format: Aggregated (species arrays preserved)")
-    print(f"     • Each row represents one 3-second time segment with all detected species")
+    df_final = df_sampled[[col for col in column_order if col in df_sampled.columns]]
     
     # Save to S3
     print(f"\n[4/4] Saving results to S3...")
