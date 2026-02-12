@@ -4,9 +4,10 @@ import duckdb
 import streamlit as st
 
 from config import (
-    EXPERT_PARQUET_DATASET,
+    EXPERT_DATASETS_FOLDER,
     EXPERT_TOP_SPECIES_COUNT,
     S3_ACCESS_KEY_ID,
+    S3_BUCKET,
     S3_ENDPOINT,
     S3_SECRET_ACCESS_KEY,
 )
@@ -27,12 +28,61 @@ def get_duckdb_connection():
     return conn
 
 
-def check_user_has_annotations(user_id):
-    """Check if user has any assigned annotations."""
+def list_available_datasets():
+    """List all available parquet datasets in the validation_dataset folder."""
+    import boto3
+    from botocore.client import Config
+
+    try:
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{S3_ENDPOINT}",
+            aws_access_key_id=S3_ACCESS_KEY_ID,
+            aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+            config=Config(signature_version="s3v4"),
+        )
+
+        # Remove s3:// prefix and get folder path
+        folder_path = EXPERT_DATASETS_FOLDER.replace(f"s3://{S3_BUCKET}/", "")
+
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET,
+            Prefix=folder_path,
+        )
+
+        if "Contents" not in response:
+            return []
+
+        datasets = []
+        for obj in response["Contents"]:
+            key = obj["Key"]
+            if key.endswith(".parquet"):
+                filename = key.split("/")[-1]
+                datasets.append(
+                    {
+                        "name": filename.replace(".parquet", ""),
+                        "path": f"s3://{S3_BUCKET}/{key}",
+                        "size": obj["Size"],
+                    }
+                )
+
+        return sorted(datasets, key=lambda x: x["name"])
+    except Exception as e:
+        st.error(f"Error listing datasets: {e}")
+        return []
+
+
+def check_user_has_annotations(user_id, dataset_path=None):
+    """Check if user has any assigned annotations in the selected dataset."""
+    if dataset_path is None:
+        dataset_path = st.session_state.get("expert_selected_dataset")
+        if not dataset_path:
+            return False
+
     try:
         conn = get_duckdb_connection()
         query = (
-            f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' "
+            f"SELECT COUNT(*) FROM '{dataset_path}' "
             "WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)"
         )
         result = conn.execute(query, [user_id]).fetchone()
@@ -42,12 +92,12 @@ def check_user_has_annotations(user_id):
 
 
 @st.cache_data
-def get_top_species_for_database():
+def get_top_species_for_database(dataset_path):
     """Get top N species by detection count for checklist."""
     conn = get_duckdb_connection()
     query = (
         f'SELECT "scientific name", COUNT(*) as count '
-        f"FROM '{EXPERT_PARQUET_DATASET}' "
+        f"FROM '{dataset_path}' "
         f'GROUP BY "scientific name" ORDER BY count DESC '
         f"LIMIT {EXPERT_TOP_SPECIES_COUNT}"
     )
@@ -57,14 +107,15 @@ def get_top_species_for_database():
 @st.cache_data(
     ttl=1800, show_spinner="Loading assigned clips..."
 )  # Cache for 10 minutes
-def get_assigned_clips_for_user(user_id):
+def get_assigned_clips_for_user(user_id, dataset_path):
     """
-    Get all assigned clips for a specific userID.
+    Get all assigned clips for a specific userID from the selected dataset.
     Returns list of dicts for efficient processing.
     CACHED to avoid repeated parquet queries.
 
     Args:
         user_id: The user's ID (can be string or int)
+        dataset_path: S3 path to the parquet dataset
 
     Returns:
         List of dicts with clip information
@@ -79,7 +130,7 @@ def get_assigned_clips_for_user(user_id):
         confidence as confidence_array,
         "max uncertainty" as uncertainty_array,
         userID
-    FROM '{EXPERT_PARQUET_DATASET}'
+    FROM '{dataset_path}'
     WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
     ORDER BY filename, start_time
     """
@@ -177,8 +228,8 @@ def _get_validated_clips_with_session(user_id):
     return validated_clips
 
 
-def get_random_assigned_clip(user_id):
-    """Get next unvalidated clip for user.
+def get_random_assigned_clip(user_id, dataset_path):
+    """Get next unvalidated clip for user from the selected dataset.
     Uses deterministic ordering (filename, start_time).
     Returns dict with clip info, or 'all_validated': True if done.
     """
@@ -203,7 +254,7 @@ def get_random_assigned_clip(user_id):
     query = f"""
     SELECT fullPath, deployment_id, "start time", "scientific name",
            confidence, "max uncertainty", userID
-    FROM '{EXPERT_PARQUET_DATASET}'
+    FROM '{dataset_path}'
     WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
     {exclusion_clause}
     ORDER BY fullPath, "start time"
@@ -226,7 +277,7 @@ def get_random_assigned_clip(user_id):
             }
         else:
             query = (
-                f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' "
+                f"SELECT COUNT(*) FROM '{dataset_path}' "
                 "WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)"
             )
             total = conn.execute(query, [user_id]).fetchone()[0]
@@ -241,8 +292,8 @@ def get_random_assigned_clip(user_id):
 
 
 @st.cache_data
-def get_remaining_pro_clips_count(user_id):
-    """Get count of remaining unvalidated clips for user.
+def get_remaining_pro_clips_count(user_id, dataset_path):
+    """Get count of remaining unvalidated clips for user in the selected dataset.
     Uses DuckDB COUNT for performance.
     """
     conn = get_duckdb_connection()
@@ -264,7 +315,7 @@ def get_remaining_pro_clips_count(user_id):
         exclusion_params = []
 
     query = (
-        f"SELECT COUNT(*) FROM '{EXPERT_PARQUET_DATASET}' "
+        f"SELECT COUNT(*) FROM '{dataset_path}' "
         f"WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR) "
         f"{exclusion_clause}"
     )

@@ -20,6 +20,7 @@ def initialize_pro_session():
             "clip_params": None,
             "authenticated": False,
             "user_id": None,
+            "selected_dataset": None,
             "validated_clips_session": set(),
             "remaining_count": None,
         },
@@ -43,8 +44,9 @@ def get_or_load_pro_clip(selections):
     """Get current Expert clip or load a new one if needed."""
     initialize_pro_session()
 
-    # Include language_code in params to detect language changes
+    # Include dataset_path and language_code in params to detect changes
     current_params = (
+        selections["dataset_path"],
         selections["user_id"],
         selections.get("language_code", "Scientific_Name"),
     )
@@ -61,11 +63,11 @@ def get_or_load_pro_clip(selections):
             from database.queries import get_remaining_pro_clips_count
 
             st.session_state.expert_remaining_count = get_remaining_pro_clips_count(
-                selections["user_id"]
+                selections["user_id"], selections["dataset_path"]
             )
 
         st.session_state.expert_current_clip = get_random_assigned_clip(
-            selections["user_id"],
+            selections["user_id"], selections["dataset_path"]
         )
 
     return st.session_state.expert_current_clip

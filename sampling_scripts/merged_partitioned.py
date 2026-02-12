@@ -1,8 +1,8 @@
 """
 This script:
-- Merges multilabel predictions and confidence scores to a single row 
+- Merges multilabel predictions and confidence scores to a single row
 - Updates full audio path for prediction
-- Adjusts output format required for Listening Lab 
+- Adjusts output format required for Listening Lab
 - Works with S3 storage using boto3
 
 Usage:
@@ -17,13 +17,10 @@ import io
 import os
 import time
 from pathlib import Path
-from urllib.parse import urlparse
 
 import boto3
 import duckdb
 import numpy as np
-import pandas as pd
-
 from dotenv import load_dotenv
 
 env_path = Path(__file__).parent.parent / ".env"
@@ -55,35 +52,35 @@ def bugg_id_to_folder(id_str):
 def get_duckdb_s3_connection():
     """Create a DuckDB connection configured for S3 access."""
     con = duckdb.connect(database=":memory:")
-    
+
     con.execute("INSTALL httpfs;")
     con.execute("LOAD httpfs;")
-    
+
     # Get S3 credentials and endpoint from environment
     s3_access_key = os.getenv("S3_ACCESS_KEY_ID")
     s3_secret_key = os.getenv("S3_SECRET_ACCESS_KEY")
     s3_endpoint = os.getenv("S3_ENDPOINT")
-    
+
     # Remove protocol if present - DuckDB adds it automatically
     s3_endpoint = s3_endpoint.replace("https://", "").replace("http://", "")
-    
+
     con.execute("SET s3_region='us-east-1';")
     con.execute(f"SET s3_access_key_id='{s3_access_key}';")
     con.execute(f"SET s3_secret_access_key='{s3_secret_key}';")
     con.execute(f"SET s3_endpoint='{s3_endpoint}';")
     con.execute("SET s3_use_ssl=true;")
     con.execute("SET s3_url_style='path';")
-    
+
     return con
 
 
 def aggregate_parquet(bucket, s3_key):
     """Load a single parquet file from S3 and aggregate to one row per segment."""
     con = get_duckdb_s3_connection()
-    
+
     # Build full S3 path
     s3_path = f"s3://{bucket}/{s3_key}"
-    
+
     # Check if file has any data
     count = con.execute(f"SELECT COUNT(*) FROM '{s3_path}'").fetchone()[0]
     if count == 0:
@@ -111,7 +108,7 @@ def aggregate_parquet(bucket, s3_key):
 
 def resolve_conf_folder(s3_client, bucket, dataset_prefix, country, device_id):
     """Resolve the conf_folder for a given country/device_id pair from S3.
-    
+
     Returns the conf_folder name if found, None otherwise.
     """
     country_folder = COUNTRY_TO_FOLDER.get(country)
@@ -119,19 +116,21 @@ def resolve_conf_folder(s3_client, bucket, dataset_prefix, country, device_id):
         return None
 
     bugg_folder = bugg_id_to_folder(device_id)
-    
-    # Try different possible paths - audio data may be stored without dataset_prefix
+
+    # Try different possible paths - audio may be stored with or without prefix
     possible_prefixes = [
-        f"{country_folder}/{bugg_folder}/",  # Direct path: proj_tabmon_NINA_FR/bugg_RPiID-...
-        f"{dataset_prefix}/{country_folder}/{bugg_folder}/",  # With prefix: tabmon_data/proj_tabmon_NINA_FR/bugg_RPiID-...
+        # Direct path: proj_tabmon_NINA_FR/bugg_RPiID-...
+        f"{country_folder}/{bugg_folder}/",
+        # With prefix: tabmon_data/proj_tabmon_NINA_FR/bugg_RPiID-...
+        f"{dataset_prefix}/{country_folder}/{bugg_folder}/",
     ]
-    
+
     for bugg_prefix in possible_prefixes:
         try:
             response = s3_client.list_objects_v2(
                 Bucket=bucket, Prefix=bugg_prefix, Delimiter="/"
             )
-            
+
             if "CommonPrefixes" in response and len(response["CommonPrefixes"]) > 0:
                 conf_folders = [
                     prefix["Prefix"].rstrip("/").split("/")[-1]
@@ -146,9 +145,10 @@ def resolve_conf_folder(s3_client, bucket, dataset_prefix, country, device_id):
                         return sorted(tabmon_folders)[0]
                     return sorted(conf_folders)[0]
 
-        except Exception:
+        except Exception as e:
+            print(f"    Warning: Failed to check prefix {bugg_prefix}: {e}")
             continue
-    
+
     return None
 
 
@@ -250,7 +250,7 @@ def main():
 
     # Initialize S3 client with credentials from environment
     s3_config = {}
-    
+
     # Check for custom endpoint (prioritize command line, then environment)
     s3_endpoint = args.s3_endpoint or os.getenv("S3_ENDPOINT")
     if s3_endpoint:
@@ -258,21 +258,21 @@ def main():
         if not s3_endpoint.startswith(("http://", "https://")):
             s3_endpoint = f"https://{s3_endpoint}"
         s3_config["endpoint_url"] = s3_endpoint
-    
+
     # Explicitly pass credentials from environment if available
     aws_access_key = os.getenv("S3_ACCESS_KEY_ID")
     aws_secret_key = os.getenv("S3_SECRET_ACCESS_KEY")
-    
+
     if aws_access_key and aws_secret_key:
         s3_config["aws_access_key_id"] = aws_access_key
         s3_config["aws_secret_access_key"] = aws_secret_key
-        print(f"Using S3 credentials from environment variables")
+        print("Using S3 credentials from environment variables")
     else:
         print("Warning: No S3 credentials found in environment variables")
-    
+
     if s3_endpoint:
         print(f"Using S3 endpoint: {s3_endpoint}")
-    
+
     s3_client = boto3.client("s3", **s3_config)
 
     total_start = time.time()
@@ -288,7 +288,10 @@ def main():
         s3_client, args.s3_bucket, args.input_prefix
     ):
         # Check if output already exists in S3
-        output_key = f"{args.output_prefix}/country={country}/device_id={device_id}/{parquet_name}"
+        output_key = (
+            f"{args.output_prefix}/country={country}/"
+            f"device_id={device_id}/{parquet_name}"
+        )
 
         if not args.overwrite:
             try:
@@ -357,12 +360,12 @@ def main():
 
     total_elapsed = time.time() - total_start
     print(
-        f"\nDone. Processed {files_processed} files, skipped {files_skipped} in {total_elapsed:.1f}s"
+        f"\nDone. Processed {files_processed} files, "
+        f"skipped {files_skipped} in {total_elapsed:.1f}s"
     )
     print(f"  Total rows in:     {total_rows_in:,}")
     print(f"  Total segments out: {total_segments_out:,}")
     print(f"  Output S3 path:    s3://{args.s3_bucket}/{args.output_prefix}/")
-
 
 
 if __name__ == "__main__":

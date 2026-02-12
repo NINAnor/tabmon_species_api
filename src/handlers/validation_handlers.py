@@ -140,16 +140,18 @@ def render_pro_validation_form(result, selections):
             st.markdown("---")
 
             # Notes/comments field
+            st.markdown("#### 📝 Additional sounds")
+
             user_notes = []
             noise_classes = [
                 "Rain",
                 "Wind",
-                "Traffic/Car",
-                "Human Voices",
-                "Aircraft",
                 "Dog/Bark",
                 "Insect/Cricket",
-                "Construction",
+                "Amphibian / FrogsConstruction",
+                "Human Voices",
+                "Traffic/Car",
+                "Aircraft",
             ]
             for noise in noise_classes:
                 if st.checkbox(
