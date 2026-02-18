@@ -244,11 +244,16 @@ def get_validated_pro_clips(user_id, dataset_path):
 
 
 def _get_validated_clips_with_session(user_id, dataset_path):
-    """Get all validated clips including session state."""
+    """Get all validated and skipped clips including session state."""
     validated_clips = get_validated_pro_clips(user_id, dataset_path)
     if hasattr(st.session_state, "expert_validated_clips_session"):
         validated_clips = validated_clips.union(
             st.session_state.expert_validated_clips_session
+        )
+    # Also include skipped clips (from "Load Next Clip" button)
+    if hasattr(st.session_state, "expert_skipped_clips_session"):
+        validated_clips = validated_clips.union(
+            st.session_state.expert_skipped_clips_session
         )
     return validated_clips
 

@@ -100,8 +100,19 @@ def render_pro_clip_section(result, selections):
 def render_pro_load_new_button():
     """Render the load new detection button for Expert mode."""
     if st.button("🔄 Load Next Clip", help="Get the next assigned clip to annotate"):
+        # Add current clip to skipped set so it won't be shown again
+        current_clip = st.session_state.get("expert_current_clip")
+        if current_clip and not current_clip.get("all_validated"):
+            filename = current_clip.get("filename")
+            start_time = current_clip.get("start_time")
+            if filename and start_time is not None:
+                if "expert_skipped_clips_session" not in st.session_state:
+                    st.session_state.expert_skipped_clips_session = set()
+                st.session_state.expert_skipped_clips_session.add(
+                    (filename, start_time)
+                )
+
         st.session_state.expert_current_clip = None
-        st.session_state.expert_clip_params = None
 
         from database.queries import (
             get_assigned_clips_for_user,

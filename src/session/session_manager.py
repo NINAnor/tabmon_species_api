@@ -22,6 +22,7 @@ def initialize_pro_session():
             "user_id": None,
             "selected_dataset": None,
             "validated_clips_session": set(),
+            "skipped_clips_session": set(),
             "remaining_count": None,
         },
     )
@@ -32,6 +33,7 @@ def clear_pro_clip_state():
     st.session_state.expert_current_clip = None
     st.session_state.expert_clip_params = None
     st.session_state.expert_validated_clips_session = set()
+    st.session_state.expert_skipped_clips_session = set()
     st.session_state.expert_remaining_count = None
 
     from database.queries import get_remaining_pro_clips_count, get_validated_pro_clips
