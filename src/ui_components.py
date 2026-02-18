@@ -141,9 +141,6 @@ def render_clip_section(result, selections):
 
         render_load_new_button()
 
-    # Prefetch next clip audio + spectrogram into cache
-    _prefetch_next_clip(selections)
-
     return True
 
 
@@ -193,30 +190,6 @@ def _generate_spectrogram_image(s3_url, start_time):
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
-
-
-def _prefetch_next_clip(selections):
-    """Prefetch the next clip's audio + spectrogram into cache."""
-    from queries import get_random_detection_clip
-    from utils import extract_clip, get_single_file_path
-
-    next_result = get_random_detection_clip(
-        selections["country"],
-        selections["device"],
-        selections["species"],
-        selections["confidence_threshold"],
-    )
-    if next_result and not next_result.get("all_validated"):
-        full_path = get_single_file_path(
-            next_result["filename"],
-            selections["country"],
-            selections["device"],
-        )
-        if full_path:
-            extract_clip(full_path, next_result["start_time"])
-            _generate_spectrogram_image(
-                full_path, next_result["start_time"]
-            )
 
 
 def render_empty_validation_placeholder():

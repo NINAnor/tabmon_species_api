@@ -65,8 +65,8 @@ def get_or_load_clip(selections):
         st.session_state.clip_params = current_params
         st.session_state.current_clip = None
 
-    # If queue is empty or current clip is None, get new clip
-    if not st.session_state.clip_queue or st.session_state.current_clip is None:
+    # Only fetch a new clip when we don't already have one
+    if st.session_state.current_clip is None:
         clip_result = get_random_detection_clip(
             selections["country"],
             selections["device"],

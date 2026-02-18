@@ -116,6 +116,9 @@ def _handle_validation_submission(
 
         save_validation_response(validation_data)
 
+        # Clear current clip so the next rerun loads a fresh one
+        st.session_state.current_clip = None
+
         st.success("✅ Thank you for your time and effort!")
         st.rerun()
     else:
