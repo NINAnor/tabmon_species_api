@@ -16,8 +16,9 @@ from config import (
 )
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def extract_clip(s3_url, start_time, sr=48000):
-    """Extract a 3-second audio clip from S3 file."""
+    """Extract a 9-second audio clip from S3 file (cached)."""
 
     if s3_url is None:
         st.error("Could not find audio file in S3")
@@ -57,9 +58,9 @@ def extract_clip(s3_url, start_time, sr=48000):
             Path(temp_file.name).unlink()
 
 
-# TODO: THIS IS WHAT TAKES THE LONGEST TIME - OPTIMIZE THIS
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_single_file_path(filename, country, deployment_id):
-    """Get the S3 URL for audio file by searching S3 efficiently."""
+    """Get the S3 URL for audio file by searching S3 (cached)."""
     if country == "France":
         suffix = "_FR"
     elif country == "Spain":

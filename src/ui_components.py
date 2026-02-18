@@ -5,6 +5,7 @@ This module contains all UI rendering functions including page setup,
 headers, logos, help sections, and display components.
 """
 
+import io
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -128,26 +129,20 @@ def render_clip_section(result, selections):
 
         st.audio(clip, format="audio/wav", sample_rate=48000)
 
-        # Optional spectrogram display
+        # Cached spectrogram display
         with st.expander("📊 Show Spectrogram"):
-            fig, ax = plt.subplots(figsize=(10, 4))
-
-            Pxx, freqs, bins, im = ax.specgram(
-                clip,
-                Fs=48000,
-                NFFT=1024,
-                noverlap=512,
-                cmap="viridis",
-                vmin=-120,  # Higher minimum dB for better dynamic range
+            img_bytes = _generate_spectrogram_image(
+                full_path, result["start_time"]
             )
-            ax.set_ylabel("Frequency (Hz)")
-            ax.set_xlabel("Time (s)")
-            ax.set_ylim(0, 12000)  # Focus on bird call frequencies
-            plt.colorbar(im, ax=ax, label="relative Intensity (dB)")
-            st.pyplot(fig)
-            plt.close()
+            if img_bytes:
+                st.image(img_bytes, use_container_width=True)
+            else:
+                st.warning("Could not generate spectrogram")
 
         render_load_new_button()
+
+    # Prefetch next clip audio + spectrogram into cache
+    _prefetch_next_clip(selections)
 
     return True
 
@@ -161,11 +156,67 @@ def render_load_new_button():
         st.session_state.current_clip = None
         st.session_state.clip_params = None
         st.session_state.clip_queue = []  # Clear clip queue
-        from queries import get_all_clips_for_species, get_validated_clips
+        from queries import get_all_clips_for_species
+        from utils import get_validated_clips
 
         get_validated_clips.clear()
-        get_all_clips_for_species.clear()  # Clear the new cached function
+        get_all_clips_for_species.clear()
         st.rerun()
+
+
+@st.cache_data(show_spinner=False)
+def _generate_spectrogram_image(s3_url, start_time):
+    """Generate spectrogram as cached PNG bytes."""
+    from utils import extract_clip
+
+    clip = extract_clip(s3_url, start_time)
+    if clip is None:
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    Pxx, freqs, bins, im = ax.specgram(
+        clip,
+        Fs=48000,
+        NFFT=1024,
+        noverlap=512,
+        cmap="viridis",
+        vmin=-120,
+    )
+    ax.set_ylabel("Frequency (Hz)")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylim(0, 12000)
+    plt.colorbar(im, ax=ax, label="Intensity (dB)")
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _prefetch_next_clip(selections):
+    """Prefetch the next clip's audio + spectrogram into cache."""
+    from queries import get_random_detection_clip
+    from utils import extract_clip, get_single_file_path
+
+    next_result = get_random_detection_clip(
+        selections["country"],
+        selections["device"],
+        selections["species"],
+        selections["confidence_threshold"],
+    )
+    if next_result and not next_result.get("all_validated"):
+        full_path = get_single_file_path(
+            next_result["filename"],
+            selections["country"],
+            selections["device"],
+        )
+        if full_path:
+            extract_clip(full_path, next_result["start_time"])
+            _generate_spectrogram_image(
+                full_path, next_result["start_time"]
+            )
 
 
 def render_empty_validation_placeholder():
