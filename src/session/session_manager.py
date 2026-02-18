@@ -35,6 +35,7 @@ def clear_pro_clip_state():
     st.session_state.expert_validated_clips_session = set()
     st.session_state.expert_skipped_clips_session = set()
     st.session_state.expert_remaining_count = None
+    st.session_state.expert_clip_queue = []
 
     from database.queries import get_remaining_pro_clips_count, get_validated_pro_clips
 

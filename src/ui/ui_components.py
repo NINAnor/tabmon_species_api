@@ -91,10 +91,29 @@ def render_pro_clip_section(result, selections):
 
         render_clip_metadata(result)
         render_audio_player(clip)
-        render_spectrogram(clip, expanded=True)
+        render_spectrogram(full_path, result["start_time"], expanded=True)
         render_pro_load_new_button()
 
+    # Prefetch the next clip's audio and spectrogram into cache
+    _prefetch_next_clip_audio()
+
     return True
+
+
+def _prefetch_next_clip_audio():
+    """Prefetch the next clip's audio and spectrogram into cache."""
+    from ui.ui_utils import _generate_spectrogram_image
+    from utils import extract_clip
+
+    clip_queue = st.session_state.get("expert_clip_queue", [])
+    if clip_queue:
+        next_clip = clip_queue[0]
+        if not next_clip.get("all_validated"):
+            filepath = next_clip["filename"].replace("bugg_RpiID", "bugg_RPiID")
+            full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
+            # Warm caches for the next clip
+            extract_clip(full_path, next_clip["start_time"])
+            _generate_spectrogram_image(full_path, next_clip["start_time"])
 
 
 def render_pro_load_new_button():

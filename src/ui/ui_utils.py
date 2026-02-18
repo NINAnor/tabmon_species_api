@@ -34,13 +34,15 @@ def render_all_validated_message(mode_name, total_clips, extra_message=""):
 
 
 @st.cache_data(show_spinner=False)
-def _generate_spectrogram_figure(clip_tuple):
-    """Generate spectrogram figure (cached).
-    clip_tuple: Tuple of audio clip for hashing.
-    """
-    import numpy as np
+def _generate_spectrogram_image(s3_url, start_time):
+    """Generate spectrogram as PNG bytes (cached by URL + start_time)."""
+    import io
 
-    clip = np.array(clip_tuple)
+    from utils import extract_clip
+
+    clip = extract_clip(s3_url, start_time)
+    if clip is None:
+        return None
 
     fig, ax = plt.subplots(figsize=(10, 4))
     Pxx, freqs, bins, im = ax.specgram(
@@ -55,16 +57,23 @@ def _generate_spectrogram_figure(clip_tuple):
     ax.set_xlabel("Time (s)")
     ax.set_ylim(0, 12000)
     plt.colorbar(im, ax=ax, label="Intensity (dB)")
-    return fig
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
 
 
-def render_spectrogram(clip, expanded=False):
+def render_spectrogram(s3_url, start_time, expanded=False):
     """Render audio spectrogram."""
     with st.expander("📊 Spectrogram", expanded=expanded):
-        clip_tuple = tuple(clip.tolist())
-        fig = _generate_spectrogram_figure(clip_tuple)
-        st.pyplot(fig)
-        plt.close()
+        img_bytes = _generate_spectrogram_image(s3_url, start_time)
+        if img_bytes:
+            st.image(img_bytes, use_container_width=True)
+        else:
+            st.warning("Could not generate spectrogram")
 
 
 def render_audio_player(clip):
