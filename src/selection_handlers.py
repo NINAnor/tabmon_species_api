@@ -136,8 +136,8 @@ def get_user_selections():
         "Minimum Confidence Threshold",
         min_value=0.0,
         max_value=1.0,
-        value=0.0,
-        step=0.1,
+        value=0.25,
+        step=0.05,
         help="Only show clips with BirdNET confidence above this threshold",
     )
 

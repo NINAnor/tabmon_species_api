@@ -8,7 +8,7 @@ and submission of validation responses.
 import pandas as pd
 import streamlit as st
 
-from queries import get_remaining_clips_count
+from queries import get_all_clips_for_species, get_remaining_clips_count
 from utils import save_validation_response
 
 
@@ -23,31 +23,49 @@ def render_validation_form(result, selections):
     with st.container(border=True):
         st.markdown("### 🎯 Validation")
 
-        # Show remaining clips count
+        # Show remaining clips count with progress bar
         remaining_clips = get_remaining_clips_count(
             selections["country"],
             selections["device"],
             selections["species"],
             selections["confidence_threshold"],
         )
-        if remaining_clips > 0:
-            st.info(
-                f"📊 Still **{remaining_clips}** clips to annotate for your "
-                f"current parameters"
+        _, total_clips = get_all_clips_for_species(
+            selections["country"],
+            selections["device"],
+            selections["species"],
+            selections["confidence_threshold"],
+        )
+        validated_count = max(0, total_clips - remaining_clips)
+
+        if total_clips > 0:
+            progress = validated_count / total_clips
+            st.progress(progress)
+            st.caption(
+                f"✅ {validated_count}/{total_clips} clips validated "
+                f"({remaining_clips} remaining)"
             )
-        else:
+        if remaining_clips <= 0:
             st.success("🎉 All clips validated for these parameters!")
+
+        # Session counter
+        session_count = st.session_state.get("session_validation_count", 0)
+        if session_count > 0:
+            st.caption(
+                f"🏆 You've validated **{session_count}** clip"
+                f"{'s' if session_count != 1 else ''} this session!"
+            )
 
         with st.form("validation_form"):
             st.markdown(f"#### Is this detection a {selections['species_display']}?")
 
-            # Add Wikipedia link for the species
+            # Reference links for the species
             species_wiki_name = selections["species"].replace(" ", "_")
             wiki_url = f"https://en.wikipedia.org/wiki/{species_wiki_name}"
+            xc_query = selections["species"].replace(" ", "+")
+            xc_url = f"https://xeno-canto.org/explore?query={xc_query}"
             st.markdown(
-                f"ℹ️ Learn more about this species: "
-                f"[Wikipedia page for {selections['species']}]({wiki_url})",
-                unsafe_allow_html=True,
+                f"ℹ️ [Wikipedia]({wiki_url}) · 🔊 [Listen on xeno-canto]({xc_url})",
             )
 
             validation_response = st.radio(
@@ -72,6 +90,15 @@ def render_validation_form(result, selections):
                 help="Rate your confidence in the validation above",
             )
 
+            user_comments = st.text_area(
+                "**💬 Comments (optional)**",
+                placeholder=(
+                    "E.g., 'Faint call in background', 'Multiple species present'..."
+                ),
+                height=80,
+                help="Any additional observations about the clip",
+            )
+
             submitted = st.form_submit_button(
                 "✅ Submit Validation", type="primary", use_container_width=True
             )
@@ -83,22 +110,19 @@ def render_validation_form(result, selections):
                 validation_response,
                 user_validation,
                 user_confidence,
+                user_comments,
             )
 
 
 def _handle_validation_submission(
-    result, selections, validation_response, user_validation, user_confidence
+    result,
+    selections,
+    validation_response,
+    user_validation,
+    user_confidence,
+    user_comments,
 ):
-    """
-    Handle validation form submission.
-
-    Args:
-        result: Dictionary containing clip information
-        selections: Dictionary containing user selections
-        validation_response: User's Yes/No/Unsure response
-        user_validation: User's text description of what they heard
-        user_confidence: User's confidence level
-    """
+    """Handle validation form submission."""
     if validation_response and user_confidence:
         validation_data = {
             "filename": result["filename"],
@@ -111,15 +135,21 @@ def _handle_validation_submission(
             "validation_response": validation_response,
             "user_validation": user_validation,
             "user_confidence": user_confidence,
+            "user_comments": user_comments,
             "timestamp": pd.Timestamp.now(),
         }
 
         save_validation_response(validation_data)
 
+        # Track session progress
+        st.session_state.session_validation_count = (
+            st.session_state.get("session_validation_count", 0) + 1
+        )
+
         # Clear current clip so the next rerun loads a fresh one
         st.session_state.current_clip = None
 
-        st.success("✅ Thank you for your time and effort!")
+        st.toast("✅ Validation saved! Loading next clip...")
         st.rerun()
     else:
         st.error("Please answer both questions before submitting.")

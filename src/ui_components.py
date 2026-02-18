@@ -130,10 +130,8 @@ def render_clip_section(result, selections):
         st.audio(clip, format="audio/wav", sample_rate=48000)
 
         # Cached spectrogram display
-        with st.expander("📊 Show Spectrogram"):
-            img_bytes = _generate_spectrogram_image(
-                full_path, result["start_time"]
-            )
+        with st.expander("📊 Show Spectrogram", expanded=True):
+            img_bytes = _generate_spectrogram_image(full_path, result["start_time"])
             if img_bytes:
                 st.image(img_bytes, use_container_width=True)
             else:
