@@ -47,9 +47,9 @@ def render_pro_validation_form(result, selections):
                 f"📊 Still **{remaining}** clips to annotate"
             )
 
-        with st.form(
-            f"expert_validation_form_{st.session_state.get('expert_form_key', 0)}"
-        ):
+        fk = st.session_state.get("expert_form_key", 0)
+
+        with st.form(f"expert_validation_form_{fk}"):
             st.markdown("#### Species detected by BirdNET in this clip:")
             st.markdown("**Select which species you can actually hear:**")
             st.markdown("---")
@@ -89,13 +89,13 @@ def render_pro_validation_form(result, selections):
                 display_name = scientific_to_display.get(species, species)
                 if st.checkbox(
                     f"{display_name} (Birdnet conf: {conf_val:.2f})",
-                    key=f"species_{idx}",
+                    key=f"species_{idx}_{fk}",
                 ):
                     selected_species.append(species)
 
             none_of_above = st.checkbox(
                 "❌ None of the above species are present",
-                key="none_of_above",
+                key=f"none_of_above_{fk}",
                 help="Check this if you cannot hear any of the species listed above",
             )
 
@@ -115,6 +115,7 @@ def render_pro_validation_form(result, selections):
                 default=[],
                 help="Search and select additional species not in the checklist above",
                 placeholder="Start typing to search...",
+                key=f"other_species_{fk}",
             )
 
             st.markdown("---")
@@ -140,11 +141,11 @@ def render_pro_validation_form(result, selections):
             nc1, nc2 = st.columns(2)
             with nc1:
                 for noise in noise_classes[:mid]:
-                    if st.checkbox(noise, key=f"{noise}"):
+                    if st.checkbox(noise, key=f"{noise}_{fk}"):
                         user_notes.append(noise)
             with nc2:
                 for noise in noise_classes[mid:]:
-                    if st.checkbox(noise, key=f"{noise}"):
+                    if st.checkbox(noise, key=f"{noise}_{fk}"):
                         user_notes.append(noise)
 
             st.markdown("---")
@@ -159,7 +160,7 @@ def render_pro_validation_form(result, selections):
                     "'Uncertain due to noise'..."
                 ),
                 height=100,
-                key="user_comments",
+                key=f"user_comments_{fk}",
             )
 
             # Confidence rating
