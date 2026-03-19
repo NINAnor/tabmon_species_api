@@ -8,8 +8,29 @@ and submission of validation responses.
 import pandas as pd
 import streamlit as st
 
+from config import LANGUAGE_MAPPING
 from queries import get_all_clips_for_species, get_remaining_clips_count
-from utils import save_validation_response
+from utils import load_species_translations, save_validation_response
+
+
+@st.cache_data
+def _get_all_species_list(language_code="Scientific_Name"):
+    """Get species names for autocomplete in selected language."""
+    translations_df = load_species_translations()
+
+    if (
+        language_code == "Scientific_Name"
+        or language_code not in translations_df.columns
+    ):
+        return sorted(translations_df["Scientific_Name"].dropna().tolist())
+
+    species_list = [
+        f"{row[language_code]} ({row['Scientific_Name']})"
+        if pd.notna(row.get(language_code))
+        else row["Scientific_Name"]
+        for _, row in translations_df.iterrows()
+    ]
+    return sorted(species_list)
 
 
 def render_validation_form(result, selections):
@@ -76,10 +97,20 @@ def render_validation_form(result, selections):
                 help="Help us validate the accuracy of our species detection models!",
             )
 
-            user_validation = st.text_input(
-                "**If no, What did you detect instead?**",
-                placeholder="e.g., different species, noise, silence, etc.",
-                help="Please describe what you actually heard in this audio clip",
+            # Get species list in the user's selected language
+            selected_language = selections.get("language", "Scientific Names")
+            if selected_language == "Scientific Names":
+                language_code = "Scientific_Name"
+            else:
+                language_code = LANGUAGE_MAPPING.get(selected_language, "Scientific_Name")
+            all_species = _get_all_species_list(language_code)
+
+            user_validation = st.multiselect(
+                "**If no, what species did you hear instead?**",
+                options=all_species,
+                default=[],
+                help="Search and select the species you actually heard in this audio clip",
+                placeholder="Start typing to search...",
             )
 
             user_confidence = st.radio(
@@ -124,6 +155,15 @@ def _handle_validation_submission(
 ):
     """Handle validation form submission."""
     if validation_response and user_confidence:
+        # Extract scientific names from multiselect
+        # Format: "Common Name (Scientific Name)"
+        detected_species = [
+            species_str.split(" (")[-1].rstrip(")")
+            if " (" in species_str and species_str.endswith(")")
+            else species_str
+            for species_str in user_validation
+        ]
+
         validation_data = {
             "filename": result["filename"],
             "country": selections["country"],
@@ -133,7 +173,7 @@ def _handle_validation_submission(
             "start_time": result["start_time"],
             "confidence": result["confidence"],
             "validation_response": validation_response,
-            "user_validation": user_validation,
+            "user_validation": detected_species,
             "user_confidence": user_confidence,
             "user_comments": user_comments,
             "timestamp": pd.Timestamp.now(),
