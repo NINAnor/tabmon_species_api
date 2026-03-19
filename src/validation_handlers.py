@@ -130,6 +130,12 @@ def render_validation_form(result, selections):
                 help="Any additional observations about the clip",
             )
 
+            annotator_name = st.text_input(
+                "**👤 Annotator Name (optional)**",
+                placeholder="Enter your name",
+                help="Your name will be recorded with the validation",
+            )
+
             submitted = st.form_submit_button(
                 "✅ Submit Validation", type="primary", use_container_width=True
             )
@@ -142,6 +148,7 @@ def render_validation_form(result, selections):
                 user_validation,
                 user_confidence,
                 user_comments,
+                annotator_name,
             )
 
 
@@ -152,6 +159,7 @@ def _handle_validation_submission(
     user_validation,
     user_confidence,
     user_comments,
+    annotator_name,
 ):
     """Handle validation form submission."""
     if validation_response and user_confidence:
@@ -176,6 +184,7 @@ def _handle_validation_submission(
             "user_validation": detected_species,
             "user_confidence": user_confidence,
             "user_comments": user_comments,
+            "annotator_name": annotator_name,
             "timestamp": pd.Timestamp.now(),
         }
 
