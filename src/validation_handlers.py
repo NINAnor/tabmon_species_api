@@ -104,14 +104,17 @@ def render_validation_form(result, selections):
             if selected_language == "Scientific Names":
                 language_code = "Scientific_Name"
             else:
-                language_code = LANGUAGE_MAPPING.get(selected_language, "Scientific_Name")
+                language_code = LANGUAGE_MAPPING.get(
+                    selected_language, "Scientific_Name"
+                )
             all_species = _get_all_species_list(language_code)
 
             user_validation = st.multiselect(
                 "**If no, what species did you hear instead?**",
                 options=all_species,
                 default=[],
-                help="Search and select the species you actually heard in this audio clip",
+                help="Search and select the species you actually heard "
+                "in this audio clip",
                 placeholder="Start typing to search...",
             )
 

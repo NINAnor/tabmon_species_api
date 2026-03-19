@@ -1,3 +1,5 @@
+import random
+
 import duckdb
 import streamlit as st
 
@@ -31,12 +33,6 @@ def get_duckdb_connection():
     )  # controls the URL format DuckDB uses for S3 requests
 
     return conn
-
-
-@st.cache_data(ttl=3600)
-def load_site_info():
-    conn = get_duckdb_connection()
-    return conn.execute(f"SELECT * FROM '{SITE_INFO_S3_PATH}'").df()
 
 
 @st.cache_data(ttl=3600)
@@ -82,26 +78,6 @@ def get_species_for_site(country, device_id):
     """
     try:
         result = conn.execute(query).fetchall()
-        return [row[0] for row in result]
-    except Exception:
-        return []
-
-
-def get_audio_files_for_species(country, device_id, species):
-    conn = get_duckdb_connection()
-    # Use Hive partitioning path structure
-    targeted_pattern = (
-        f"{S3_BASE_URL}/merged_predictions_light/"
-        f"country={country}/device_id={device_id}/*.parquet"
-    )
-    query = f"""
-    SELECT filename
-    FROM '{targeted_pattern}'
-    WHERE "scientific name" = ?
-    LIMIT 10
-    """
-    try:
-        result = conn.execute(query, [species]).fetchall()
         return [row[0] for row in result]
     except Exception:
         return []
@@ -167,8 +143,6 @@ def get_random_detection_clip(country, device_id, species, confidence_threshold=
             "total_clips": total_clips,
             "validated_count": len(validated_clips),
         }
-
-    import random
 
     return random.choice(unvalidated_clips)  # noqa: S311
 

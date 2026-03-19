@@ -16,6 +16,17 @@ from config import (
 )
 
 
+def _get_s3_client():
+    """Create configured S3 client."""
+    return boto3.client(
+        "s3",
+        endpoint_url=f"https://{S3_ENDPOINT}",
+        aws_access_key_id=S3_ACCESS_KEY_ID,
+        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+        config=Config(signature_version="s3v4"),
+    )
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def extract_clip(s3_url, start_time, sr=48000):
     """Extract a 9-second audio clip from S3 file (cached)."""
@@ -24,17 +35,9 @@ def extract_clip(s3_url, start_time, sr=48000):
         st.error("Could not find audio file in S3")
         return None
 
-    # Configure boto3 for S3 access
-    s3_client = boto3.client(
-        "s3",
-        endpoint_url=f"https://{S3_ENDPOINT}",
-        aws_access_key_id=S3_ACCESS_KEY_ID,
-        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
-    )
+    s3_client = _get_s3_client()
 
     # Parse S3 URL to get bucket and key
-    # s3://bucket/path/to/file.wav -> bucket='bucket', key='path/to/file.wav'
     s3_parts = s3_url.replace("s3://", "").split("/", 1)
     bucket = s3_parts[0]
     key = s3_parts[1] if len(s3_parts) > 1 else ""
@@ -70,16 +73,8 @@ def get_single_file_path(filename, country, deployment_id):
     elif country == "Norway":
         suffix = ""
 
-    # Configure boto3 for S3 access
-    s3_client = boto3.client(
-        "s3",
-        endpoint_url=f"https://{S3_ENDPOINT}",
-        aws_access_key_id=S3_ACCESS_KEY_ID,
-        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
-    )
+    s3_client = _get_s3_client()
 
-    # get bucket name from url
     bucket = S3_BASE_URL.replace("s3://", "")
 
     # search directory structure
@@ -133,15 +128,7 @@ def save_validation_response(validation_data):
     """Save validation to session-specific file to avoid concurrent write issues."""
     session_id = st.session_state.session_id
 
-    # Configure boto3 for S3 access
-    s3_client = boto3.client(
-        "s3",
-        endpoint_url=f"https://{S3_ENDPOINT}",
-        aws_access_key_id=S3_ACCESS_KEY_ID,
-        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
-    )
-
+    s3_client = _get_s3_client()
     bucket = S3_BASE_URL.replace("s3://", "")
 
     # Use session ID as filename: validations/session_{session_id}.csv
@@ -190,15 +177,7 @@ def save_validation_response(validation_data):
 def get_validated_clips(country, device_id, species):
     """Read all validation files from S3 and return validated clips set."""
     try:
-        # Configure boto3 for S3 access
-        s3_client = boto3.client(
-            "s3",
-            endpoint_url=f"https://{S3_ENDPOINT}",
-            aws_access_key_id=S3_ACCESS_KEY_ID,
-            aws_secret_access_key=S3_SECRET_ACCESS_KEY,
-            config=Config(signature_version="s3v4"),
-        )
-
+        s3_client = _get_s3_client()
         bucket = S3_BASE_URL.replace("s3://", "")
         prefix = "validations/"
 
@@ -250,19 +229,11 @@ def get_validated_clips(country, device_id, species):
 
 @st.cache_data(ttl=3600)
 def match_device_id_to_site(site_info_s3_path):
-    # Use DuckDB to read from S3 instead of pandas directly
     from queries import get_duckdb_connection
 
     conn = get_duckdb_connection()
-    site_info_df = conn.execute(
-        f"SELECT DeviceID, Site FROM '{site_info_s3_path}'"
-    ).df()
-
-    device_site_map = {}
-    for _, row in site_info_df.iterrows():
-        device_site_map[row["DeviceID"]] = row["Site"]
-
-    return device_site_map
+    df = conn.execute(f"SELECT DeviceID, Site FROM '{site_info_s3_path}'").df()
+    return dict(zip(df["DeviceID"], df["Site"], strict=False))
 
 
 @st.cache_data
