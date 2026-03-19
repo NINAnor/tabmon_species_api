@@ -77,7 +77,9 @@ def render_validation_form(result, selections):
                 f"{'s' if session_count != 1 else ''} this session!"
             )
 
-        with st.form("validation_form"):
+        fk = st.session_state.get("validation_form_key", 0)
+
+        with st.form(f"validation_form_{fk}"):
             st.markdown(f"#### Is this detection a {selections['species_display']}?")
 
             # Reference links for the species
@@ -197,6 +199,11 @@ def _handle_validation_submission(
 
         # Clear current clip so the next rerun loads a fresh one
         st.session_state.current_clip = None
+
+        # Increment form key to reset all form fields
+        st.session_state.validation_form_key = (
+            st.session_state.get("validation_form_key", 0) + 1
+        )
 
         st.toast("✅ Validation saved! Loading next clip...")
         st.rerun()

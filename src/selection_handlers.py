@@ -19,13 +19,16 @@ from utils import get_species_display_names, match_device_id_to_site
 
 # Common species that are present across most habitats
 COMMON_SPECIES = [
-    "Corvus corone",
-    "Columba palumbus",
+    "Phylloscopus collybita",
     "Erithacus rubecula",
+    "Phylloscopus trochilus",
+    "Fringilla coelebs",
+    "Emberiza schoeniclus",
     "Turdus merula",
-    "Cygnus olor",
-    "Branta canadensis",
-    "Cuculus canorus",
+    "Regulus regulus",
+    "Prunella modularis",
+    "Troglodytes troglodytes",
+    "Motacilla alba",
 ]
 
 
@@ -57,12 +60,45 @@ def get_user_selections():
 
     # Country selection
     countries = get_available_countries()
-    selected_country = st.sidebar.selectbox("Select Country", countries)
+    device_site_mapping = match_device_id_to_site(SITE_INFO_S3_PATH)
+
+    # On very first load, randomize country, site, and species together
+    # so they are all consistent before any selectbox renders.
+    if "selections_initialized" not in st.session_state:
+        random_country = random.choice(countries)  # noqa: S311
+        st.session_state.country_selector = random_country
+
+        # Pre-compute site for the random country
+        init_devices = get_sites_for_country(random_country)
+        init_sites = {}
+        for d in init_devices:
+            if d in device_site_mapping:
+                init_sites[device_site_mapping[d]] = d
+        init_site_names = list(init_sites.keys())
+        if init_site_names:
+            random_site = random.choice(init_site_names)  # noqa: S311
+            st.session_state.site_selector = random_site
+
+            # Pre-compute species for the random site
+            init_device = init_sites[random_site]
+            init_species = get_species_for_site(random_country, init_device)
+            if init_species:
+                available_common = [s for s in COMMON_SPECIES if s in init_species]
+                if available_common:
+                    rand_sp = random.choice(available_common)  # noqa: S311
+                else:
+                    rand_sp = random.choice(init_species)  # noqa: S311
+                st.session_state.species_selector = rand_sp
+
+        st.session_state.selections_initialized = True
+
+    selected_country = st.sidebar.selectbox(
+        "Select Country", countries, key="country_selector"
+    )
 
     # Site selection
     with st.spinner(f"Loading sites for {selected_country}..."):
         devices = get_sites_for_country(selected_country)
-    device_site_mapping = match_device_id_to_site(SITE_INFO_S3_PATH)
 
     filtered_sites = {}
     for device in devices:
@@ -70,8 +106,10 @@ def get_user_selections():
             site_name = device_site_mapping[device]
             filtered_sites[site_name] = device
 
+    site_names = list(filtered_sites.keys())
+
     selected_site_name = st.sidebar.selectbox(
-        "Select Site", list(filtered_sites.keys())
+        "Select Site", site_names, key="site_selector"
     )
     selected_device = filtered_sites[selected_site_name]
 
@@ -94,49 +132,21 @@ def get_user_selections():
 
     display_names = list(species_display_map.keys())
 
-    # Determine default species index - maintain selection across reruns
-    default_index = 0
-
     # Clean up old session state variable if it exists
     if "selected_species_display" in st.session_state:
         del st.session_state.selected_species_display
 
-    # If we have a previously selected species (stored as scientific name), find it
-    if "selected_species_scientific" in st.session_state:
-        # Find the display name for this scientific name
-        for i, display_name in enumerate(display_names):
-            if (
-                species_display_map[display_name]
-                == st.session_state.selected_species_scientific
-            ):
-                default_index = i
-                break
-
-    # Only do random selection on very first load
-    if "species_initialized" not in st.session_state:
-        available_common = [s for s in COMMON_SPECIES if s in detected_species]
-        if available_common:
-            random_species = random.choice(available_common)
-            for i, display_name in enumerate(display_names):
-                if species_display_map[display_name] == random_species:
-                    default_index = i
-                    break
-        st.session_state.species_initialized = True
-
     selected_species_display = st.sidebar.selectbox(
-        "Select Species", display_names, index=default_index
+        "Select Species", display_names, key="species_selector"
     )
     selected_species = species_display_map[selected_species_display]
-
-    # Store the scientific name (not display name) for next rerun
-    st.session_state.selected_species_scientific = selected_species
 
     # Confidence threshold
     confidence_threshold = st.sidebar.slider(
         "Minimum Confidence Threshold",
         min_value=0.0,
         max_value=1.0,
-        value=0.25,
+        value=0.8,
         step=0.05,
         help="Only show clips with BirdNET confidence above this threshold",
     )
