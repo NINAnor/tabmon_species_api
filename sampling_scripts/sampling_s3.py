@@ -1,10 +1,11 @@
 """S3 operations for annotation sampling."""
 
 import io
-import json
 import os
 
 import boto3
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 
 def format_dataframe_for_app(df):
@@ -12,23 +13,26 @@ def format_dataframe_for_app(df):
     Format DataFrame to match the expected structure for the annotation app.
 
     Expected format:
-    - scientific name: string representation of list (e.g., '["species1", "species2"]')
-    - confidence: string representation of list (e.g., '[0.5, 0.9]')
-    - max uncertainty: string representation of list (e.g., '[0.2, 0.5]')
+    - scientific name: native list of strings
+    - confidence: native list of floats
+    - max uncertainty: native list of floats
     - userID: string
     """
     df = df.copy()
 
-    # Convert arrays to JSON string representations
-    df["scientific name"] = df["scientific name"].apply(
-        lambda x: json.dumps(x.tolist() if hasattr(x, "tolist") else x)
-    )
-    df["confidence"] = df["confidence"].apply(
-        lambda x: json.dumps(x.tolist() if hasattr(x, "tolist") else x)
-    )
-    df["max uncertainty"] = df["max uncertainty"].apply(
-        lambda x: json.dumps(x.tolist() if hasattr(x, "tolist") else x)
-    )
+    # Ensure list columns contain proper Python lists
+    def _to_list(x):
+        if isinstance(x, list):
+            return x
+        if hasattr(x, "tolist"):
+            return x.tolist()
+        if isinstance(x, (int, float)):
+            return [x]
+        return list(x)
+
+    for col in ["scientific name", "confidence", "max uncertainty"]:
+        if col in df.columns:
+            df[col] = df[col].apply(_to_list)
 
     # Ensure userID is string
     if "userID" in df.columns:
@@ -59,9 +63,10 @@ def upload_to_s3(df, s3_bucket, output_key):
 
     s3_client = boto3.client("s3", **s3_config)
 
-    # Convert to parquet and upload
+    # Convert to parquet with native list types via PyArrow
+    table = pa.Table.from_pandas(df)
     parquet_buffer = io.BytesIO()
-    df.to_parquet(parquet_buffer, index=False, engine="pyarrow")
+    pq.write_table(table, parquet_buffer)
     parquet_buffer.seek(0)
 
     s3_client.put_object(
