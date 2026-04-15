@@ -85,13 +85,26 @@ def render_pro_validation_form(result, selections):
 
             # Display checklist
             selected_species = []
+            vocalization_types = {}
             for idx, (species, conf_val) in enumerate(species_data):
                 display_name = scientific_to_display.get(species, species)
-                if st.checkbox(
-                    f"{display_name} (Birdnet conf: {conf_val:.2f})",
-                    key=f"species_{idx}_{fk}",
-                ):
+                col_check, col_vocal = st.columns([3, 2])
+                with col_check:
+                    checked = st.checkbox(
+                        f"{display_name} (Birdnet conf: {conf_val:.2f})",
+                        key=f"species_{idx}_{fk}",
+                    )
+                with col_vocal:
+                    vocal_type = st.selectbox(
+                        "Vocalization",
+                        options=["", "Call", "Song"],
+                        key=f"vocal_{idx}_{fk}",
+                        label_visibility="collapsed",
+                    )
+                if checked:
                     selected_species.append(species)
+                    if vocal_type:
+                        vocalization_types[species] = vocal_type
 
             none_of_above = st.checkbox(
                 "❌ None of the above species are present",
@@ -187,6 +200,7 @@ def render_pro_validation_form(result, selections):
                     user_notes,
                     user_confidence,
                     user_comments,
+                    vocalization_types,
                 )
 
 
@@ -198,6 +212,7 @@ def _handle_pro_validation_submission(
     user_notes,
     user_confidence,
     user_comments,
+    vocalization_types,
 ):
     """Handle Expert mode validation form submission."""
     if not user_confidence:
@@ -229,6 +244,7 @@ def _handle_pro_validation_submission(
         "start_time": result["start_time"],
         "identified_species": all_identified_species,
         "species_count": len(all_identified_species),
+        "vocalization_types": vocalization_types,
         "user_confidence": user_confidence,
         "user_notes": user_notes,
         "user_comments": user_comments,

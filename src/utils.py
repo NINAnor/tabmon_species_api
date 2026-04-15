@@ -118,6 +118,10 @@ def save_pro_validation_response(validation_data):
         "birdnet_confidences": list_to_string(
             validation_data.get("birdnet_confidences")
         ),
+        "vocalization_types": "|".join(
+            f"{species}:{vtype}"
+            for species, vtype in (validation_data.get("vocalization_types") or {}).items()
+        ),
     }
 
     validation_df = pd.DataFrame([validation_data_copy])
