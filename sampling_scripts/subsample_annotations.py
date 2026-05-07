@@ -27,7 +27,7 @@ import numpy as np
 from sampling_core import load_segments_from_s3, subsample_by_confidence_bins
 from sampling_diagnostics import generate_diagnostics
 from sampling_s3 import upload_to_s3
-from sampling_utils import assign_user_ids, count_unique_species
+from sampling_utils import assign_user_ids, count_unique_species, enrich_with_site_info
 
 # S3 defaults
 DEFAULT_S3_BUCKET = "bencretois-ns8129k-proj-tabmon"
@@ -166,6 +166,10 @@ def main():
         print("\n❌ No segments found. Exiting.")
         return
 
+    # Enrich with site name and cluster from site_info.csv
+    print("  → Enriching with site info (site name, cluster)...")
+    df_segments = enrich_with_site_info(df_segments, args.s3_bucket)
+
     # Step 2: Subsample by confidence
     strategies = []
     if args.stratify_by_device:
@@ -211,6 +215,10 @@ def main():
         "confidence",
         "max uncertainty",
         "userID",
+        "country",
+        "device_id",
+        "site_name",
+        "cluster",
     ]
     df_final = df_sampled[[col for col in column_order if col in df_sampled.columns]]
 

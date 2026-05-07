@@ -125,3 +125,42 @@ def count_unique_species(df, target_species=None):
     return (
         len(all_species & set(target_species)) if target_species else len(all_species)
     )
+
+
+def get_site_info_map(s3_bucket):
+    """Load device_id to site/cluster mapping from site_info.csv on S3.
+
+    Returns dict mapping device_id -> {"site": ..., "cluster": ...}.
+    """
+    con = get_duckdb_s3_connection()
+    s3_path = f"s3://{s3_bucket}/site_info.csv"
+    try:
+        df = con.execute(
+            f"SELECT DeviceID, Site, Cluster FROM '{s3_path}'"
+        ).fetchdf()
+        con.close()
+        return {
+            row["DeviceID"]: {"site": row["Site"], "cluster": row["Cluster"]}
+            for _, row in df.iterrows()
+        }
+    except Exception as e:
+        con.close()
+        print(f"  ⚠ Could not load site_info.csv: {e}")
+        return {}
+
+
+def enrich_with_site_info(df, s3_bucket):
+    """Add site_name and cluster columns to DataFrame using site_info.csv lookup."""
+    site_map = get_site_info_map(s3_bucket)
+    if not site_map:
+        df["site_name"] = np.nan
+        df["cluster"] = np.nan
+        return df
+
+    df["site_name"] = df["device_id"].map(
+        lambda x: site_map.get(x, {}).get("site", np.nan)
+    )
+    df["cluster"] = df["device_id"].map(
+        lambda x: site_map.get(x, {}).get("cluster", np.nan)
+    )
+    return df

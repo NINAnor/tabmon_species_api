@@ -234,11 +234,25 @@ def _handle_pro_validation_submission(
     birdnet_species = result.get("species_array", []) or []
     birdnet_confidences = result.get("confidence_array", []) or []
 
+    # Look up site metadata from site_info.csv
+    from database.queries import get_device_site_map
+
+    deployment_id = result.get("deployment_id", "")
+    device_site_map = get_device_site_map()
+    # Try lookup by deployment_id first, then by device_id (last segment)
+    site_info = device_site_map.get(deployment_id)
+    if not site_info:
+        device_id = deployment_id.rsplit("_", 1)[-1] if "_" in deployment_id else deployment_id
+        site_info = device_site_map.get(device_id, {})
+
     # Prepare validation data
     validation_data = {
         "filename": result["filename"],
         "userID": selections["user_id"],
-        "deployment_id": result.get("deployment_id", ""),
+        "deployment_id": deployment_id,
+        "country": site_info.get("country", ""),
+        "site_name": site_info.get("site", ""),
+        "cluster": site_info.get("cluster", ""),
         "birdnet_species_detected": birdnet_species,
         "birdnet_confidences": birdnet_confidences,
         "start_time": result["start_time"],

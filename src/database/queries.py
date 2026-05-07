@@ -31,19 +31,23 @@ def get_duckdb_connection():
 
 @st.cache_data(ttl=3600)
 def get_device_site_map():
-    """Load device_id to site/cluster mapping from site_info.csv on S3.
+    """Load device_id to site/cluster/country mapping from site_info.csv on S3.
 
-    Returns dict mapping device_id -> {"site": ..., "cluster": ...}.
+    Returns dict mapping device_id -> {"site": ..., "cluster": ..., "country": ...}.
+    Also supports lookup by deployment_id.
     """
     try:
         conn = get_duckdb_connection()
         df = conn.execute(
-            f"SELECT DeviceID, Site, Cluster FROM '{SITE_INFO_S3_PATH}'"
+            f"SELECT DeviceID, DeploymentID, Site, Cluster, Country FROM '{SITE_INFO_S3_PATH}'"
         ).df()
-        return {
-            row["DeviceID"]: {"site": row["Site"], "cluster": row["Cluster"]}
-            for _, row in df.iterrows()
-        }
+        result = {}
+        for _, row in df.iterrows():
+            info = {"site": row["Site"], "cluster": row["Cluster"], "country": row["Country"]}
+            result[row["DeviceID"]] = info
+            if row["DeploymentID"]:
+                result[row["DeploymentID"]] = info
+        return result
     except Exception:
         return {}
 

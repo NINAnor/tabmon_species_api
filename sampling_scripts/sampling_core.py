@@ -33,14 +33,17 @@ def load_segments_from_s3(s3_bucket, input_prefix, target_species, target_sites=
                 print(f"    [{i}/{len(target_sites)}] Reading {site}...")
                 query = f"""
                     SELECT filename, deployment_id, fullPath, "start time",
-                           "scientific name", confidence, "max uncertainty", userID
+                           "scientific name", confidence, "max uncertainty", userID,
+                           country, device_id
                     FROM read_parquet('{pattern}', hive_partitioning=true)
                     WHERE list_has_any("scientific name", {species_array})
                 """
                 df = con.execute(query).fetchdf()
 
                 if not df.empty:
-                    df["device_id"] = site  # Add device_id from partition
+                    # Backfill device_id if not populated by hive partitioning
+                    if "device_id" not in df.columns or df["device_id"].isna().all():
+                        df["device_id"] = site
                     all_dfs.append(df)
                     print(f"       ✓ Found {len(df):,} matching segments")
                 else:
@@ -61,7 +64,8 @@ def load_segments_from_s3(s3_bucket, input_prefix, target_species, target_sites=
         try:
             query = f"""
                 SELECT filename, deployment_id, fullPath, "start time",
-                       "scientific name", confidence, "max uncertainty", userID
+                       "scientific name", confidence, "max uncertainty", userID,
+                       country, device_id
                 FROM read_parquet('{s3_pattern}', hive_partitioning=true)
                 WHERE list_has_any("scientific name", {species_array})
             """
