@@ -86,9 +86,36 @@ def render_spectrogram(s3_url, start_time, expanded=False):
             st.warning("Could not generate spectrogram")
 
 
+# Fixed gain applied to all clips uniformly — tune this value to adjust playback volume.
+# No peak normalization: relative loudness differences between clips are preserved.
+AUDIO_GAIN = 0.3
+
+
 def render_audio_player(clip):
-    """Render audio player widget."""
-    st.audio(clip, format="audio/wav", sample_rate=48000)
+    """Render audio player widget with fixed gain and autoplay.
+
+    Encodes audio as WAV bytes to bypass Streamlit's internal full-scale
+    normalization (which only triggers on numpy array input). A fixed
+    AUDIO_GAIN is applied so all clips play at the same relative volume.
+    """
+    import io
+    import wave
+
+    import numpy as np
+
+    if clip is None:
+        return
+
+    pcm = np.clip(clip * 32767 * AUDIO_GAIN, -32768, 32767).astype(np.int16)
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)  # 2 bytes = int16
+        wav_file.setframerate(48000)
+        wav_file.writeframes(pcm.tobytes())
+
+    st.audio(buf.getvalue(), format="audio/wav", autoplay=True)
 
 
 def _parse_recording_datetime(filename):

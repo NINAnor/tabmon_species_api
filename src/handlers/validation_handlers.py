@@ -133,6 +133,23 @@ def render_pro_validation_form(result, selections):
 
             st.markdown("---")
 
+            # Confidence rating
+            user_confidence = st.radio(
+                "**How confident are you in your annotations?**",
+                options=["Low", "Moderate", "High"],
+                index=None,
+                horizontal=True,
+                help=(
+                    "Rate your overall confidence in the species identifications above"
+                ),
+            )
+
+            submitted = st.form_submit_button(
+                "✅ Submit Validation", type="primary", use_container_width=True
+            )
+
+            st.markdown("---")
+
             # Notes/comments field
             st.markdown("#### 📝 Additional sounds")
 
@@ -174,21 +191,6 @@ def render_pro_validation_form(result, selections):
                 ),
                 height=100,
                 key=f"user_comments_{fk}",
-            )
-
-            # Confidence rating
-            user_confidence = st.radio(
-                "**How confident are you in your annotations?**",
-                options=["Low", "Moderate", "High"],
-                index=None,
-                horizontal=True,
-                help=(
-                    "Rate your overall confidence in the species identifications above"
-                ),
-            )
-
-            submitted = st.form_submit_button(
-                "✅ Submit Validation", type="primary", use_container_width=True
             )
 
             if submitted:
