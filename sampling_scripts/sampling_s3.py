@@ -26,7 +26,7 @@ def format_dataframe_for_app(df):
             return x
         if hasattr(x, "tolist"):
             return x.tolist()
-        if isinstance(x, (int, float)):
+        if isinstance(x, int | float):
             return [x]
         return list(x)
 

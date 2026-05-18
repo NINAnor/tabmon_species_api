@@ -39,11 +39,16 @@ def get_device_site_map():
     try:
         conn = get_duckdb_connection()
         df = conn.execute(
-            f"SELECT DeviceID, DeploymentID, Site, Cluster, Country FROM '{SITE_INFO_S3_PATH}'"
+            f"SELECT DeviceID, DeploymentID, Site, Cluster, Country"
+            f" FROM '{SITE_INFO_S3_PATH}'"
         ).df()
         result = {}
         for _, row in df.iterrows():
-            info = {"site": row["Site"], "cluster": row["Cluster"], "country": row["Country"]}
+            info = {
+                "site": row["Site"],
+                "cluster": row["Cluster"],
+                "country": row["Country"],
+            }
             result[row["DeviceID"]] = info
             if row["DeploymentID"]:
                 result[row["DeploymentID"]] = info

@@ -135,9 +135,7 @@ def get_site_info_map(s3_bucket):
     con = get_duckdb_s3_connection()
     s3_path = f"s3://{s3_bucket}/site_info.csv"
     try:
-        df = con.execute(
-            f"SELECT DeviceID, Site, Cluster FROM '{s3_path}'"
-        ).fetchdf()
+        df = con.execute(f"SELECT DeviceID, Site, Cluster FROM '{s3_path}'").fetchdf()
         con.close()
         return {
             row["DeviceID"]: {"site": row["Site"], "cluster": row["Cluster"]}

@@ -108,7 +108,7 @@ def _prefetch_next_clip_audio():
     clip_queue = st.session_state.get("expert_clip_queue", [])
     if clip_queue:
         next_clip = clip_queue[0]
-        if not next_clip.get("all_validated"):
+        if not next_clip.get("all_validated") and next_clip.get("filename"):
             filepath = next_clip["filename"].replace("bugg_RpiID", "bugg_RPiID")
             full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
             # Warm caches for the next clip

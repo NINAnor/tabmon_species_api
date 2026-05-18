@@ -25,7 +25,7 @@ docker compose up --build
 - PREFER top-level imports over local imports or fully qualified names
 - PREFER using  `_get_s3_client()` helper in `utils.py` so you don't duplicate boto3 setup
 - PREFER using duckdb over polar or pandas for filtering the dataset
-- ALWAYS use polar over pandas 
+- ALWAYS use polar over pandas
 - AVOID shortening variable names e.g., use `version` instead of `ver`, and `requires_python` instead of `rp`
 
 ## Branches

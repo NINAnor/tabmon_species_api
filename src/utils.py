@@ -120,7 +120,9 @@ def save_pro_validation_response(validation_data):
         ),
         "vocalization_types": "|".join(
             f"{species}:{vtype}"
-            for species, vtype in (validation_data.get("vocalization_types") or {}).items()
+            for species, vtype in (
+                validation_data.get("vocalization_types") or {}
+            ).items()
         ),
     }
 

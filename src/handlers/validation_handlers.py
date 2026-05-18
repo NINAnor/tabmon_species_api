@@ -242,7 +242,9 @@ def _handle_pro_validation_submission(
     # Try lookup by deployment_id first, then by device_id (last segment)
     site_info = device_site_map.get(deployment_id)
     if not site_info:
-        device_id = deployment_id.rsplit("_", 1)[-1] if "_" in deployment_id else deployment_id
+        device_id = (
+            deployment_id.rsplit("_", 1)[-1] if "_" in deployment_id else deployment_id
+        )
         site_info = device_site_map.get(device_id, {})
 
     # Prepare validation data
