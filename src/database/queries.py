@@ -353,6 +353,7 @@ def prefetch_clip_batch(user_id, dataset_path, species_filter=None):
            confidence, userID
     FROM '{dataset_path}'
     WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
+    AND fullPath IS NOT NULL AND fullPath != ''
     {exclusion_clause}
     {species_clause}
     ORDER BY fullPath, "start time"
@@ -371,6 +372,7 @@ def prefetch_clip_batch(user_id, dataset_path, species_filter=None):
         count_query = (
             f"SELECT COUNT(*) FROM '{dataset_path}' "
             f"WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR) "
+            f"AND fullPath IS NOT NULL AND fullPath != '' "
             f"{species_clause}"
         )
         total = conn.execute(count_query, [user_id] + species_params).fetchone()[0]
@@ -443,6 +445,7 @@ def get_remaining_pro_clips_count(user_id, dataset_path, species_filter=None):
     query = (
         f"SELECT COUNT(*) FROM '{dataset_path}' "
         f"WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR) "
+        f"AND fullPath IS NOT NULL AND fullPath != '' "
         f"{exclusion_clause} "
         f"{species_clause}"
     )

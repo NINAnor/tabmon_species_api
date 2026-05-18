@@ -72,10 +72,14 @@ def render_pro_clip_section(result, selections):
         st.warning(f"No clips assigned for user {selections['user_id']}")
         return False
 
-    if result.get("all_validated"):
+    if result.get("all_validated") or not result.get("filename"):
+        if not result.get("all_validated"):
+            st.warning("Clip has no file path and cannot be displayed. Loading next clip...")
+            st.session_state.expert_current_clip = None
+            st.rerun()
         render_all_validated_message(
             mode_name="assigned clips",
-            total_clips=result["total_clips"],
+            total_clips=result.get("total_clips", 0),
             extra_message=(
                 "Your annotation work is complete. Thank you for your contribution!"
             ),
