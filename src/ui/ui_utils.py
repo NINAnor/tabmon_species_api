@@ -88,7 +88,7 @@ def render_spectrogram(s3_url, start_time, expanded=False):
 
 # Fixed gain applied to all clips uniformly — tune this value to adjust playback volume.
 # No peak normalization: relative loudness differences between clips are preserved.
-AUDIO_GAIN = 0.3
+AUDIO_GAIN = 0.9
 
 
 def render_audio_player(clip):
