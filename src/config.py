@@ -10,6 +10,9 @@ S3_BUCKET = os.getenv("S3_BUCKET")
 # S3 paths
 S3_BASE_URL = f"s3://{S3_BUCKET}"
 SITE_INFO_S3_PATH = f"{S3_BASE_URL}/site_info.csv"
+PREDICTIONS_S3_PREFIX = os.getenv(
+    "PREDICTIONS_S3_PREFIX", "tabmon_predictions/merged_predictions_light"
+).strip("/")
 
 BIRDNET_MULTILINGUAL_PATH = (
     Path(__file__).parent.parent / "assets" / "birdnet_multilingual.csv"

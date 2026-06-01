@@ -15,4 +15,4 @@ services:
     env_file:
       - ".env"
     ports:
-      - "8501:8501"
+      - "8506:8501"

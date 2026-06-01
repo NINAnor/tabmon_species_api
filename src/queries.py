@@ -4,6 +4,7 @@ import duckdb
 import streamlit as st
 
 from config import (
+    PREDICTIONS_S3_PREFIX,
     S3_ACCESS_KEY_ID,
     S3_BASE_URL,
     S3_ENDPOINT,
@@ -66,7 +67,7 @@ def get_species_for_site(country, device_id):
     conn = get_duckdb_connection()
     # Use Hive partitioning path structure
     targeted_pattern = (
-        f"{S3_BASE_URL}/merged_predictions_light/"
+        f"{S3_BASE_URL}/{PREDICTIONS_S3_PREFIX}/"
         f"country={country}/device_id={device_id}/*.parquet"
     )
     query = f"""
@@ -91,7 +92,7 @@ def get_all_clips_for_species(country, device_id, species, confidence_threshold=
     conn = get_duckdb_connection()
     # Use Hive partitioning path structure
     targeted_pattern = (
-        f"{S3_BASE_URL}/merged_predictions_light/"
+        f"{S3_BASE_URL}/{PREDICTIONS_S3_PREFIX}/"
         f"country={country}/device_id={device_id}/*.parquet"
     )
     query = f"""
