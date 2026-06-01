@@ -11,6 +11,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import streamlit as st
 
+from config import AUDIO_GAIN
+
 
 def setup_page_config():
     """Configure Streamlit page settings."""
@@ -127,7 +129,7 @@ def render_clip_section(result, selections):
                 f"**🎯 BirdNET Confidence score:** `{result['confidence']:.2f}`"
             )
 
-        st.audio(clip, format="audio/wav", sample_rate=48000)
+        render_audio_player(clip)
 
         # Cached spectrogram display
         with st.expander("📊 Show Spectrogram", expanded=True):
@@ -140,6 +142,27 @@ def render_clip_section(result, selections):
         render_load_new_button()
 
     return True
+
+
+def render_audio_player(clip):
+    """Render audio player with fixed gain and autoplay enabled."""
+    import wave
+
+    import numpy as np
+
+    if clip is None:
+        return
+
+    pcm = np.clip(clip * 32767 * AUDIO_GAIN, -32768, 32767).astype(np.int16)
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(48000)
+        wav_file.writeframes(pcm.tobytes())
+
+    st.audio(buf.getvalue(), format="audio/wav", autoplay=True)
 
 
 def render_load_new_button():

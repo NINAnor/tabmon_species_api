@@ -6,12 +6,14 @@ language, and confidence threshold selections in the sidebar.
 """
 
 import random
+from datetime import datetime
 
 import streamlit as st
 
 from config import LANGUAGE_MAPPING, SITE_INFO_S3_PATH
 from queries import (
     get_available_countries,
+    get_datetime_bounds_for_site,
     get_sites_for_country,
     get_species_for_site,
 )
@@ -113,8 +115,69 @@ def get_user_selections():
     )
     selected_device = filtered_sites[selected_site_name]
 
+    # Optional datetime filter
+    use_datetime_filter = st.sidebar.checkbox(
+        "Filter by datetime",
+        value=False,
+        help="Restrict detections to a specific recording datetime range",
+    )
+
+    start_datetime = None
+    end_datetime = None
+
+    if use_datetime_filter:
+        min_datetime, max_datetime = get_datetime_bounds_for_site(
+            selected_country, selected_device
+        )
+
+        if min_datetime and max_datetime:
+            st.sidebar.caption(
+                "Available range: "
+                f"{min_datetime:%Y-%m-%d %H:%M:%S} to "
+                f"{max_datetime:%Y-%m-%d %H:%M:%S}"
+            )
+
+            start_date = st.sidebar.date_input(
+                "Start date",
+                value=min_datetime.date(),
+                key="start_date_filter",
+            )
+            start_time = st.sidebar.time_input(
+                "Start time",
+                value=min_datetime.time().replace(microsecond=0),
+                key="start_time_filter",
+            )
+            end_date = st.sidebar.date_input(
+                "End date",
+                value=max_datetime.date(),
+                key="end_date_filter",
+            )
+            end_time = st.sidebar.time_input(
+                "End time",
+                value=max_datetime.time().replace(microsecond=0),
+                key="end_time_filter",
+            )
+
+            start_datetime = datetime.combine(start_date, start_time)
+            end_datetime = datetime.combine(end_date, end_time)
+
+            if start_datetime > end_datetime:
+                st.sidebar.error("Start datetime must be earlier than end datetime")
+                return None
+        else:
+            st.sidebar.warning(
+                "No recording datetime metadata found for this site. "
+                "Datetime filtering has been disabled."
+            )
+            use_datetime_filter = False
+
     # Species selection with translation
-    detected_species = get_species_for_site(selected_country, selected_device)
+    detected_species = get_species_for_site(
+        selected_country,
+        selected_device,
+        start_datetime=start_datetime,
+        end_datetime=end_datetime,
+    )
 
     # Check if site has data
     if not detected_species:
@@ -159,4 +222,7 @@ def get_user_selections():
         "species": selected_species,
         "species_display": selected_species_display,
         "confidence_threshold": confidence_threshold,
+        "use_datetime_filter": use_datetime_filter,
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime,
     }

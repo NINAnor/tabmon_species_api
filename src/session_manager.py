@@ -26,6 +26,8 @@ def get_or_load_clip(selections):
         selections["device"],
         selections["species"],
         selections["confidence_threshold"],
+        selections.get("start_datetime"),
+        selections.get("end_datetime"),
     )
 
     # If parameters changed, reload
@@ -40,6 +42,8 @@ def get_or_load_clip(selections):
             selections["device"],
             selections["species"],
             selections["confidence_threshold"],
+            selections.get("start_datetime"),
+            selections.get("end_datetime"),
         )
 
     return st.session_state.current_clip

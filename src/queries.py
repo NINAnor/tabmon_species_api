@@ -14,6 +14,24 @@ from config import (
 from utils import get_validated_clips
 
 
+def _build_targeted_pattern(country, device_id):
+    return (
+        f"{S3_BASE_URL}/{PREDICTIONS_S3_PREFIX}/"
+        f"country={country}/device_id={device_id}/*.parquet"
+    )
+
+
+def _detection_datetime_expression():
+    return (
+        "try_strptime("
+        "regexp_extract(filename, '(\\d{4}-\\d{2}-\\d{2})T(\\d{2}_\\d{2}_\\d{2})', 1)"
+        " || ' ' || "
+        "replace(regexp_extract(filename, '(\\d{4}-\\d{2}-\\d{2})T(\\d{2}_\\d{2}_\\d{2})', 2), '_', ':'),"
+        " '%Y-%m-%d %H:%M:%S'"
+        ") + (\"start time\" * INTERVAL 1 SECOND)"
+    )
+
+
 @st.cache_resource
 def get_duckdb_connection():
     conn = duckdb.connect()
@@ -63,46 +81,96 @@ def get_sites_for_country(country):
 
 
 @st.cache_data(ttl=600, show_spinner="Loading species...")
-def get_species_for_site(country, device_id):
+def get_species_for_site(country, device_id, start_datetime=None, end_datetime=None):
     conn = get_duckdb_connection()
-    # Use Hive partitioning path structure
-    targeted_pattern = (
-        f"{S3_BASE_URL}/{PREDICTIONS_S3_PREFIX}/"
-        f"country={country}/device_id={device_id}/*.parquet"
-    )
+    targeted_pattern = _build_targeted_pattern(country, device_id)
     query = f"""
+    WITH detections AS (
+        SELECT
+            "scientific name",
+            {_detection_datetime_expression()} AS detection_datetime
+        FROM '{targeted_pattern}'
+    )
     SELECT "scientific name", COUNT(*) as cnt
-    FROM '{targeted_pattern}'
+    FROM detections
+    WHERE 1=1
+    {"AND detection_datetime >= ?" if start_datetime else ""}
+    {"AND detection_datetime <= ?" if end_datetime else ""}
     GROUP BY "scientific name"
     HAVING cnt >= 5
     ORDER BY "scientific name"
     """
+    params = []
+    if start_datetime:
+        params.append(start_datetime)
+    if end_datetime:
+        params.append(end_datetime)
     try:
-        result = conn.execute(query).fetchall()
+        result = conn.execute(query, params).fetchall()
         return [row[0] for row in result]
     except Exception:
         return []
 
 
+@st.cache_data(ttl=600)
+def get_datetime_bounds_for_site(country, device_id):
+    conn = get_duckdb_connection()
+    targeted_pattern = _build_targeted_pattern(country, device_id)
+    query = f"""
+    SELECT
+        MIN(detection_datetime) AS min_detection_datetime,
+        MAX(detection_datetime) AS max_detection_datetime
+    FROM (
+        SELECT {_detection_datetime_expression()} AS detection_datetime
+        FROM '{targeted_pattern}'
+    )
+    WHERE detection_datetime IS NOT NULL
+    """
+    try:
+        return conn.execute(query).fetchone()
+    except Exception:
+        return (None, None)
+
+
 @st.cache_data(ttl=3600, show_spinner="Extracting the species at the selected site")
-def get_all_clips_for_species(country, device_id, species, confidence_threshold=0.0):
+def get_all_clips_for_species(
+    country,
+    device_id,
+    species,
+    confidence_threshold=0.0,
+    start_datetime=None,
+    end_datetime=None,
+):
     """Get all clips for a species/location combination with confidence filtering.
     Returns tuple of (all_clips_data, total_count) for efficient processing.
     """
     conn = get_duckdb_connection()
-    # Use Hive partitioning path structure
-    targeted_pattern = (
-        f"{S3_BASE_URL}/{PREDICTIONS_S3_PREFIX}/"
-        f"country={country}/device_id={device_id}/*.parquet"
-    )
+    targeted_pattern = _build_targeted_pattern(country, device_id)
     query = f"""
+    WITH detections AS (
+        SELECT
+            filename,
+            "start time",
+            confidence,
+            "scientific name",
+            {_detection_datetime_expression()} AS detection_datetime
+        FROM '{targeted_pattern}'
+    )
     SELECT filename, "start time", confidence
-    FROM '{targeted_pattern}'
-    WHERE "scientific name" = ? AND confidence >= ?
+    FROM detections
+    WHERE "scientific name" = ?
+      AND confidence >= ?
+      {"AND detection_datetime >= ?" if start_datetime else ""}
+      {"AND detection_datetime <= ?" if end_datetime else ""}
     ORDER BY confidence DESC
     """
     try:
-        results = conn.execute(query, [species, confidence_threshold]).fetchall()
+        params = [species, confidence_threshold]
+        if start_datetime:
+            params.append(start_datetime)
+        if end_datetime:
+            params.append(end_datetime)
+        results = conn.execute(query, params).fetchall()
 
         clips_data = [
             {
@@ -118,11 +186,23 @@ def get_all_clips_for_species(country, device_id, species, confidence_threshold=
         return [], 0
 
 
-def get_random_detection_clip(country, device_id, species, confidence_threshold=0.0):
+def get_random_detection_clip(
+    country,
+    device_id,
+    species,
+    confidence_threshold=0.0,
+    start_datetime=None,
+    end_datetime=None,
+):
     """Optimized version using cached data for better performance."""
     # Get all clips data (cached)
     all_clips, total_clips = get_all_clips_for_species(
-        country, device_id, species, confidence_threshold
+        country,
+        device_id,
+        species,
+        confidence_threshold,
+        start_datetime,
+        end_datetime,
     )
 
     if not all_clips:
@@ -148,11 +228,23 @@ def get_random_detection_clip(country, device_id, species, confidence_threshold=
     return random.choice(unvalidated_clips)  # noqa: S311
 
 
-def get_remaining_clips_count(country, device_id, species, confidence_threshold):
+def get_remaining_clips_count(
+    country,
+    device_id,
+    species,
+    confidence_threshold,
+    start_datetime=None,
+    end_datetime=None,
+):
     """Use cached clip data instead of separate database query."""
     # Use cached clip data
     _, total_clips = get_all_clips_for_species(
-        country, device_id, species, confidence_threshold
+        country,
+        device_id,
+        species,
+        confidence_threshold,
+        start_datetime,
+        end_datetime,
     )
 
     # Get validated clips count

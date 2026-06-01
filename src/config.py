@@ -14,6 +14,11 @@ PREDICTIONS_S3_PREFIX = os.getenv(
     "PREDICTIONS_S3_PREFIX", "tabmon_predictions/merged_predictions_light"
 ).strip("/")
 
+try:
+    AUDIO_GAIN = float(os.getenv("AUDIO_GAIN", "0.9"))
+except ValueError:
+    AUDIO_GAIN = 0.9
+
 BIRDNET_MULTILINGUAL_PATH = (
     Path(__file__).parent.parent / "assets" / "birdnet_multilingual.csv"
 )
