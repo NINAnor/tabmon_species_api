@@ -124,6 +124,8 @@ def save_pro_validation_response(validation_data):
                 validation_data.get("vocalization_types") or {}
             ).items()
         ),
+        "user_notes": list_to_string(validation_data.get("user_notes")),
+        "is_cross_validation": validation_data.get("is_cross_validation", False),
     }
 
     validation_df = pd.DataFrame([validation_data_copy])

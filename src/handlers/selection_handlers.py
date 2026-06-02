@@ -201,6 +201,25 @@ def get_pro_user_selections():
     # Step 4: Species filter (optional, uses selected language)
     species_filter = render_species_filter(user_id, dataset_path, language_code)
 
+    # Step 5: Mode selection (Validate vs Review)
+    st.sidebar.markdown("---")
+    st.sidebar.header("⚙️ Mode")
+    mode = st.sidebar.radio(
+        "Choose mode:",
+        options=["🎯 Validate New Clips", "🔍 Review Validated Clips"],
+        index=0 if not st.session_state.get("review_mode_active") else 1,
+        help="Switch between annotating new clips or reviewing previous validations",
+    )
+
+    is_review_mode = mode == "🔍 Review Validated Clips"
+    if is_review_mode != st.session_state.get("review_mode_active", False):
+        st.session_state.review_mode_active = is_review_mode
+        # Reset review state when switching modes
+        if not is_review_mode:
+            st.session_state.review_results = None
+            st.session_state.review_current_index = 0
+        st.rerun()
+
     return {
         "dataset_path": dataset_path,
         "user_id": user_id,

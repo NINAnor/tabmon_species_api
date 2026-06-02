@@ -26,6 +26,21 @@ def initialize_pro_session():
             "remaining_count": None,
         },
     )
+    initialize_review_session()
+
+
+def initialize_review_session():
+    """Initialize review mode session state variables."""
+    init_state_vars(
+        "review_",
+        {
+            "mode_active": False,
+            "results": None,
+            "current_index": 0,
+            "filters": {},
+            "form_key": 0,
+        },
+    )
 
 
 def clear_pro_clip_state():

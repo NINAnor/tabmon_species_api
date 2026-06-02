@@ -7,6 +7,7 @@ Expert mode is designed for assigned annotation tasks with user authentication.
 
 import streamlit as st
 
+from handlers.review_handlers import render_review_filters
 from handlers.selection_handlers import get_pro_user_selections
 from handlers.validation_handlers import render_pro_validation_form
 from session.session_manager import get_or_load_pro_clip, initialize_pro_session
@@ -17,6 +18,7 @@ from ui.ui_components import (
     render_pro_help_section,
     render_pro_page_header,
 )
+from ui.review_components import render_review_clip_section
 from ui.ui_utils import setup_page_config
 
 
@@ -46,6 +48,15 @@ def main():
 
     st.markdown("---")
 
+    # Route between Validate and Review modes
+    if st.session_state.get("review_mode_active", False):
+        _render_review_mode(selections)
+    else:
+        _render_validate_mode(selections)
+
+
+def _render_validate_mode(selections):
+    """Render the standard validation mode."""
     # Load clip based on selections
     result = get_or_load_pro_clip(selections)
 
@@ -62,6 +73,19 @@ def main():
             render_pro_all_validated_placeholder()
         else:
             render_pro_empty_validation_placeholder()
+
+
+def _render_review_mode(selections):
+    """Render the review/cross-checking mode."""
+    # Render filters as an expander on the main page
+    has_results = render_review_filters(
+        selections["dataset_path"],
+        selections.get("language_code", "Scientific_Name"),
+    )
+
+    # Render review content below filters
+    if has_results:
+        render_review_clip_section(selections)
 
 
 if __name__ == "__main__":
