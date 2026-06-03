@@ -190,6 +190,33 @@ def get_filtered_validations(dataset_path, filters):
     if validator:
         df = df[df["userID"].astype(str) == str(validator)]
 
+    # Filter by annotation result (TP/FP) — original annotations only
+    annotation_result = filters.get("annotation_result")
+    if annotation_result:
+        if "is_cross_validation" in df.columns:
+            orig_mask = ~df["is_cross_validation"].fillna(False).astype(bool)
+        else:
+            orig_mask = pd.Series([True] * len(df), index=df.index)
+
+        def _is_tp(row):
+            detected = {
+                s.strip()
+                for s in str(row.get("birdnet_species_detected", "")).split("|")
+                if s.strip()
+            }
+            identified = {
+                s.strip()
+                for s in str(row.get("identified_species", "")).split("|")
+                if s.strip() and s.strip() != "NONE_DETECTED"
+            }
+            return bool(detected & identified)
+
+        tp_mask = df.apply(_is_tp, axis=1)
+        if annotation_result == "TP":
+            df = df[orig_mask & tp_mask]
+        elif annotation_result == "FP":
+            df = df[orig_mask & ~tp_mask]
+
     return df.reset_index(drop=True)
 
 

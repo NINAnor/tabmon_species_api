@@ -10,6 +10,7 @@ from ui.ui_utils import (
     render_audio_player,
     render_clip_metadata,
 )
+from handlers.validation_handlers import _get_all_species_list
 from utils import extract_clip, get_species_display_names, save_pro_validation_response
 
 
@@ -185,7 +186,7 @@ def _render_original_validation(record, selections):
         # Cross-validation indicator
         is_cross = record.get("is_cross_validation", False)
         if is_cross:
-            st.caption("🔄 This record is itself a cross-validation")
+            st.warning("🔄 **This record is itself a cross-validation** — it was not produced by the primary annotator.")
 
 
 def _render_navigation(total_count, current_index):
@@ -230,6 +231,8 @@ def _render_cross_validation_form(record, selections):
     with st.container(border=True):
         st.markdown("### 🔄 Your Annotation")
 
+        _render_cross_validated_warning(record, selections)
+
         fk = st.session_state.get("review_form_key", 0)
 
         with st.form(f"cross_validation_form_{fk}"):
@@ -243,6 +246,7 @@ def _render_cross_validation_form(record, selections):
 
             language_code = selections.get("language_code", "Scientific_Name")
 
+            scientific_to_display = {}
             if species_list:
                 display_map = get_species_display_names(species_list, language_code)
                 scientific_to_display = {
@@ -296,6 +300,18 @@ def _render_cross_validation_form(record, selections):
             if none_of_above:
                 selected_species = ["NONE_DETECTED"]
 
+            # Additional species not detected by BirdNET
+            already_shown = set(scientific_to_display.values())
+            all_species_options = _get_all_species_list(language_code)
+            extra_options = [s for s in all_species_options if s not in already_shown]
+            extra_species_raw = st.multiselect(
+                "➕ Add species not in BirdNET list",
+                options=extra_options,
+                key=f"review_extra_species_{fk}",
+                placeholder="Start typing to search...",
+                help="Add species you hear that BirdNET did not detect",
+            )
+
             st.markdown("---")
 
             # Confidence rating
@@ -329,7 +345,36 @@ def _render_cross_validation_form(record, selections):
                     vocalization_types,
                     user_confidence,
                     user_comments,
+                    extra_species_raw,
                 )
+
+
+def _render_cross_validated_warning(record, selections):
+    """Show a warning if the current user has already cross-validated this clip."""
+    from database.review_queries import load_dataset_validations
+
+    dataset_path = selections.get("dataset_path", "")
+    user_id = str(selections.get("user_id", ""))
+    filename = str(record.get("filename", ""))
+    start_time = record.get("start_time", 0)
+
+    all_validations = load_dataset_validations(dataset_path)
+    if all_validations.empty or "is_cross_validation" not in all_validations.columns:
+        return
+
+    prior = all_validations[
+        (all_validations["is_cross_validation"].fillna(False).astype(bool))
+        & (all_validations["userID"].astype(str) == user_id)
+        & (all_validations["filename"].astype(str) == filename)
+        & (all_validations["start_time"].astype(float) == float(start_time))
+    ]
+
+    if not prior.empty:
+        ts = prior.iloc[0].get("timestamp", "")
+        st.warning(
+            f"⚠️ You already cross-validated this clip on **{ts}**. "
+            "Submitting again will add a duplicate entry."
+        )
 
 
 def _handle_cross_validation_submission(
@@ -339,11 +384,22 @@ def _handle_cross_validation_submission(
     vocalization_types,
     user_confidence,
     user_comments,
+    extra_species_raw=None,
 ):
     """Handle cross-validation form submission."""
     if not user_confidence:
         st.error("Please rate your confidence before submitting.")
         return
+
+    # Parse extra species and merge (format: "Common Name (Scientific Name)" or plain scientific)
+    if extra_species_raw and "NONE_DETECTED" not in selected_species:
+        additional_species = [
+            s.split(" (")[-1].rstrip(")")
+            if " (" in s and s.endswith(")")
+            else s
+            for s in extra_species_raw
+        ]
+        selected_species = selected_species + additional_species
 
     from database.queries import get_device_site_map
 
@@ -391,10 +447,14 @@ def _handle_cross_validation_submission(
     success = save_pro_validation_response(validation_data)
 
     if success:
-        st.session_state.review_form_key += 1
-        # Clear cached validations so the new cross-validation appears
         from database.review_queries import load_dataset_validations
 
         load_dataset_validations.clear()
+        # Auto-advance to the next clip
+        results_df = st.session_state.review_results
+        current_index = st.session_state.review_current_index
+        if results_df is not None and current_index + 1 < len(results_df):
+            st.session_state.review_current_index = current_index + 1
+        st.session_state.review_form_key += 1
         st.toast("✅ Cross-validation saved!")
         st.rerun()

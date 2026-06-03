@@ -28,23 +28,24 @@ def render_review_filters(dataset_path, language_code):
 
         st.caption(f"📋 {len(validations_df)} validated clips available")
 
-        # Lay out filters in columns for compact display
+        # Three logical column groups
         col1, col2, col3 = st.columns(3)
 
+        # ── col1: Recording details (when & signal strength) ────────────────
         with col1:
-            # Date range filter
+            st.markdown("##### 📡 Recording")
+
             min_date = validations_df["recording_date"].min()
             max_date = validations_df["recording_date"].max()
 
             if min_date is not None and max_date is not None and not (hasattr(min_date, 'year') and min_date != min_date):
                 date_range = st.date_input(
-                    "🗓️ Recording Date Range",
+                    "🗓️ Date range",
                     value=(min_date, max_date),
                     min_value=min_date,
                     max_value=max_date,
                     help="Filter by recording date range",
                 )
-                # date_input returns tuple when range, single date otherwise
                 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
                     selected_date_range = date_range
                 else:
@@ -53,9 +54,8 @@ def render_review_filters(dataset_path, language_code):
                 selected_date_range = None
                 st.info("No date information available")
 
-            # BirdNET confidence range
             confidence_range = st.slider(
-                "🤖 BirdNET Confidence",
+                "🤖 BirdNET confidence",
                 min_value=0.0,
                 max_value=1.0,
                 value=(0.0, 1.0),
@@ -63,8 +63,6 @@ def render_review_filters(dataset_path, language_code):
                 help="Filter by max BirdNET confidence score",
             )
 
-        with col2:
-            # Site filter
             available_sites = sorted(
                 validations_df["site_name"]
                 .dropna()
@@ -81,16 +79,10 @@ def render_review_filters(dataset_path, language_code):
                 placeholder="All sites",
             )
 
-            # Expert confidence class
-            confidence_classes = st.multiselect(
-                "🎯 Expert Confidence",
-                options=["Low", "Moderate", "High"],
-                default=[],
-                help="Filter by the expert's confidence rating",
-                placeholder="All levels",
-            )
+        # ── col2: Species & detection result ────────────────────────────────
+        with col2:
+            st.markdown("##### 🐦 Species & Result")
 
-            # Species filter
             all_species_in_validations = set()
             for species_str in validations_df["birdnet_species_detected"].dropna():
                 for species in str(species_str).split("|"):
@@ -103,9 +95,7 @@ def render_review_filters(dataset_path, language_code):
             if language_code != "Scientific_Name":
                 from utils import get_species_display_names
 
-                display_map = get_species_display_names(
-                    species_options, language_code
-                )
+                display_map = get_species_display_names(species_options, language_code)
                 display_to_scientific = display_map
                 display_options = sorted(display_map.keys())
             else:
@@ -124,14 +114,49 @@ def render_review_filters(dataset_path, language_code):
                 or None
             )
 
-        with col3:
-            # Validator filter
-            available_validators = get_available_validators(dataset_path)
-            validator_options = ["All validators"] + available_validators
+            vocalization_type = st.selectbox(
+                "🎵 Vocalization type",
+                options=["All", "Call", "Song"],
+                help="Filter by vocalization type identified by expert",
+            )
+            selected_vocalization = (
+                None if vocalization_type == "All" else vocalization_type
+            )
 
+            st.markdown("**🎯 Annotation result**")
+            annotation_result_option = st.radio(
+                "Annotation result",
+                options=["All", "✅ True Positives", "❌ False Positives"],
+                index=0,
+                horizontal=True,
+                help=(
+                    "True Positive: at least one BirdNET-detected species confirmed by the annotator. "
+                    "False Positive: no detected species confirmed (includes NONE). "
+                    "Applies to original annotations only."
+                ),
+                label_visibility="collapsed",
+            )
+            annotation_result = {
+                "✅ True Positives": "TP",
+                "❌ False Positives": "FP",
+            }.get(annotation_result_option)
+
+        # ── col3: Annotation quality & people ───────────────────────────────
+        with col3:
+            st.markdown("##### 📋 Annotation")
+
+            confidence_classes = st.multiselect(
+                "🎯 Expert confidence",
+                options=["Low", "Moderate", "High"],
+                default=[],
+                help="Filter by the expert's confidence rating",
+                placeholder="All levels",
+            )
+
+            available_validators = get_available_validators(dataset_path)
             selected_validator = st.selectbox(
                 "👤 Validator",
-                options=validator_options,
+                options=["All validators"] + available_validators,
                 help="Filter by who performed the validation",
             )
             validator_filter = (
@@ -140,7 +165,6 @@ def render_review_filters(dataset_path, language_code):
                 else selected_validator
             )
 
-            # Comments filter
             has_comments = st.checkbox(
                 "💬 Has comments only",
                 value=False,
@@ -152,16 +176,6 @@ def render_review_filters(dataset_path, language_code):
                 value="",
                 help="Search for text in comments",
                 placeholder="e.g. 'uncertain'",
-            )
-
-            # Vocalization type filter
-            vocalization_type = st.selectbox(
-                "🎵 Vocalization Type",
-                options=["All", "Call", "Song"],
-                help="Filter by vocalization type identified by expert",
-            )
-            selected_vocalization = (
-                None if vocalization_type == "All" else vocalization_type
             )
 
         # Action buttons row
@@ -181,6 +195,7 @@ def render_review_filters(dataset_path, language_code):
                     "validator": validator_filter,
                     "vocalization_type": selected_vocalization,
                     "sites": selected_sites or None,
+                    "annotation_result": annotation_result,
                 }
 
                 results_df = get_filtered_validations(dataset_path, filters)
