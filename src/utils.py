@@ -46,8 +46,12 @@ def get_species_display_names(species_list, language_code):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def extract_clip(s3_url, start_time, sr=48000):
-    """Extract ~5-second audio clip from S3 (1s before + 4s after detection start)."""
+def extract_clip(s3_url, start_time, sr=48000, context_seconds=1):
+    """Extract audio clip from S3 with configurable context padding.
+
+    Extracts `context_seconds` before and after the 3-second BirdNET detection
+    window (total duration = 3 + 2 * context_seconds).
+    """
     if not s3_url:
         st.error("Could not find audio file in S3")
         return None
@@ -66,8 +70,8 @@ def extract_clip(s3_url, start_time, sr=48000):
         try:
             s3_client.download_file(bucket, key, temp_file.name)
             audio_data, _ = librosa.load(temp_file.name, sr=sr, mono=True)
-            start_sample = int(max(0, (start_time - 1) * sr))
-            end_sample = int(min(len(audio_data), (start_time + 4) * sr))
+            start_sample = int(max(0, (start_time - context_seconds) * sr))
+            end_sample = int(min(len(audio_data), (start_time + 3 + context_seconds) * sr))
             return audio_data[start_sample:end_sample]
         finally:
             Path(temp_file.name).unlink()

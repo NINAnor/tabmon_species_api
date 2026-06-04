@@ -91,11 +91,22 @@ def render_pro_clip_section(result, selections):
 
         filepath = result["filename"].replace("bugg_RpiID", "bugg_RPiID")
         full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
-        clip = extract_clip(full_path, result["start_time"])
+
+        context_seconds = st.slider(
+            "Context around detection (s)",
+            min_value=1,
+            max_value=5,
+            value=1,
+            step=1,
+            key="context_seconds",
+            help="Seconds of audio context before and after the 3-second BirdNET detection window.",
+        )
+
+        clip = extract_clip(full_path, result["start_time"], context_seconds=context_seconds)
 
         render_clip_metadata(result)
         render_audio_player(clip)
-        render_spectrogram(full_path, result["start_time"], expanded=True)
+        render_spectrogram(full_path, result["start_time"], expanded=True, context_seconds=context_seconds)
         render_pro_load_new_button()
 
     # Prefetch the next clip's audio and spectrogram into cache
@@ -115,9 +126,10 @@ def _prefetch_next_clip_audio():
         if not next_clip.get("all_validated") and next_clip.get("filename"):
             filepath = next_clip["filename"].replace("bugg_RpiID", "bugg_RPiID")
             full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
+            context_seconds = st.session_state.get("context_seconds", 1)
             # Warm caches for the next clip
-            extract_clip(full_path, next_clip["start_time"])
-            _generate_spectrogram_image(full_path, next_clip["start_time"])
+            extract_clip(full_path, next_clip["start_time"], context_seconds=context_seconds)
+            _generate_spectrogram_image(full_path, next_clip["start_time"], context_seconds=context_seconds)
 
 
 def render_pro_load_new_button():

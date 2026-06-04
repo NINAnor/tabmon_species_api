@@ -34,13 +34,13 @@ def render_all_validated_message(mode_name, total_clips, extra_message=""):
 
 
 @st.cache_data(show_spinner=False)
-def _generate_spectrogram_image(s3_url, start_time):
-    """Generate spectrogram as PNG bytes (cached by URL + start_time)."""
+def _generate_spectrogram_image(s3_url, start_time, context_seconds=1):
+    """Generate spectrogram as PNG bytes (cached by URL + start_time + context_seconds)."""
     import io
 
     from utils import extract_clip
 
-    clip = extract_clip(s3_url, start_time)
+    clip = extract_clip(s3_url, start_time, context_seconds=context_seconds)
     if clip is None:
         return None
 
@@ -57,9 +57,9 @@ def _generate_spectrogram_image(s3_url, start_time):
     ax.set_xlabel("Time (s)")
     ax.set_ylim(0, 12000)
 
-    # Mark the 3s BirdNET detection window (1s to 4s in the 5s clip)
-    ax.axvline(x=1.0, color="red", linestyle="--", linewidth=1.5, alpha=0.8)
-    ax.axvline(x=4.0, color="red", linestyle="--", linewidth=1.5, alpha=0.8)
+    # Mark the 3s BirdNET detection window, offset by the context padding
+    ax.axvline(x=context_seconds, color="red", linestyle="--", linewidth=1.5, alpha=0.8)
+    ax.axvline(x=context_seconds + 3.0, color="red", linestyle="--", linewidth=1.5, alpha=0.8)
 
     plt.colorbar(im, ax=ax, label="Intensity (dB)")
     plt.tight_layout()
@@ -71,10 +71,10 @@ def _generate_spectrogram_image(s3_url, start_time):
     return buf.getvalue()
 
 
-def render_spectrogram(s3_url, start_time, expanded=False):
+def render_spectrogram(s3_url, start_time, expanded=False, context_seconds=1):
     """Render audio spectrogram (standalone, without sync)."""
     with st.expander("📊 Spectrogram", expanded=expanded):
-        img_bytes = _generate_spectrogram_image(s3_url, start_time)
+        img_bytes = _generate_spectrogram_image(s3_url, start_time, context_seconds)
         if img_bytes:
             st.image(img_bytes, use_container_width=True)
             st.caption(

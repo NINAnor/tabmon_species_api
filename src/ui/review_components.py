@@ -75,11 +75,21 @@ def _render_audio_and_spectrogram(record):
         }
         render_clip_metadata(clip_info)
 
-        clip = extract_clip(full_path, start_time)
+        context_seconds = st.slider(
+            "Context around detection (s)",
+            min_value=1,
+            max_value=5,
+            value=1,
+            step=1,
+            key="review_context_seconds",
+            help="Seconds of audio context before and after the 3-second BirdNET detection window.",
+        )
+
+        clip = extract_clip(full_path, start_time, context_seconds=context_seconds)
         render_audio_player(clip)
 
         # Render spectrogram inline (no expander wrapper)
-        img_bytes = _generate_spectrogram_image(full_path, start_time)
+        img_bytes = _generate_spectrogram_image(full_path, start_time, context_seconds)
         if img_bytes:
             st.image(img_bytes, use_container_width=True)
             st.caption(
