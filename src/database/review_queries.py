@@ -209,6 +209,12 @@ def get_filtered_validations(dataset_path, filters):
                 for s in str(row.get("identified_species", "")).split("|")
                 if s.strip() and s.strip() != "NONE_DETECTED"
             }
+            if species_filter:
+                # Scope TP/FP to the selected species only:
+                # TP = the target species was detected AND confirmed by the validator
+                # FP = the target species was detected but NOT confirmed
+                target_detected = detected & set(species_filter)
+                return bool(target_detected & identified)
             return bool(detected & identified)
 
         tp_mask = df.apply(_is_tp, axis=1)
