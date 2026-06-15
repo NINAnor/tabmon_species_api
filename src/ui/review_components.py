@@ -246,6 +246,23 @@ def _render_cross_validation_form(record, selections):
         fk = st.session_state.get("review_form_key", 0)
 
         with st.form(f"cross_validation_form_{fk}"):
+            # Update mode toggle — unchecked by default (cross-validation is the norm)
+            is_update_mode = st.checkbox(
+                "✏️ This is an update to my original annotation",
+                value=False,
+                key=f"review_is_update_{fk}",
+                help="Tick this if you are the original validator and are filling in missing information (e.g. vocalization type), not performing a cross-validation.",
+            )
+
+            # Pre-parse original vocalization types for pre-filling when in update mode
+            original_voc_str = str(record.get("vocalization_types", ""))
+            original_voc_map = {}
+            if original_voc_str and original_voc_str != "nan":
+                for pair in original_voc_str.split("|"):
+                    if ":" in pair:
+                        sp, vtype = pair.split(":", 1)
+                        original_voc_map[sp.strip()] = vtype.strip()
+
             # Species from BirdNET detections
             species_str = str(record.get("birdnet_species_detected", ""))
             confidence_str = str(record.get("birdnet_confidences", ""))
@@ -288,9 +305,13 @@ def _render_cross_validation_form(record, selections):
                             key=f"review_species_{idx}_{fk}",
                         )
                     with col_vocal:
+                        prefilled_voc = original_voc_map.get(species, "")
+                        voc_options = ["", "Call", "Song"]
+                        voc_default_idx = voc_options.index(prefilled_voc) if is_update_mode and prefilled_voc in voc_options else 0
                         vocal_type = st.selectbox(
                             "Type",
-                            options=["", "Call", "Song"],
+                            options=voc_options,
+                            index=voc_default_idx,
                             key=f"review_vocal_{idx}_{fk}",
                             label_visibility="collapsed",
                         )
@@ -333,16 +354,20 @@ def _render_cross_validation_form(record, selections):
                 key=f"review_confidence_{fk}",
             )
 
-            # Comments
+            # Comments — pre-filled from original when in update mode
+            original_comments = str(record.get("user_comments", ""))
+            original_comments = "" if original_comments == "nan" else original_comments
             user_comments = st.text_area(
                 "💬 Comments:",
+                value=original_comments if is_update_mode else "",
                 placeholder="Observations...",
                 height=70,
                 key=f"review_comments_{fk}",
             )
 
+            submit_label = "✅ Submit Update" if is_update_mode else "✅ Submit Cross-Validation"
             submitted = st.form_submit_button(
-                "✅ Submit Cross-Validation",
+                submit_label,
                 type="primary",
                 use_container_width=True,
             )
@@ -356,6 +381,7 @@ def _render_cross_validation_form(record, selections):
                     user_confidence,
                     user_comments,
                     extra_species_raw,
+                    is_update=is_update_mode,
                 )
 
 
@@ -395,8 +421,9 @@ def _handle_cross_validation_submission(
     user_confidence,
     user_comments,
     extra_species_raw=None,
+    is_update=False,
 ):
-    """Handle cross-validation form submission."""
+    """Handle cross-validation or update form submission."""
     if not user_confidence:
         st.error("Please rate your confidence before submitting.")
         return
@@ -451,7 +478,8 @@ def _handle_cross_validation_submission(
         "user_notes": [],
         "user_comments": user_comments or "",
         "timestamp": pd.Timestamp.now(),
-        "is_cross_validation": True,
+        "is_cross_validation": not is_update,
+        "is_update": is_update,
     }
 
     success = save_pro_validation_response(validation_data)

@@ -57,9 +57,15 @@ def _generate_spectrogram_image(s3_url, start_time, context_seconds=1):
     ax.set_xlabel("Time (s)")
     ax.set_ylim(0, 12000)
 
-    # Mark the 3s BirdNET detection window, offset by the context padding
-    ax.axvline(x=context_seconds, color="red", linestyle="--", linewidth=1.5, alpha=0.8)
-    ax.axvline(x=context_seconds + 3.0, color="red", linestyle="--", linewidth=1.5, alpha=0.8)
+    # Mark the 3s BirdNET detection window.
+    # Both bounds are clamped to the actual extracted clip duration, which may be
+    # shorter than nominal when the detection is near the start or end of the file.
+    actual_pre = min(context_seconds, start_time)
+    clip_duration = len(clip) / 48000
+    detection_start_in_clip = min(actual_pre, clip_duration)
+    detection_end_in_clip = min(actual_pre + 3.0, clip_duration)
+    ax.axvline(x=detection_start_in_clip, color="red", linestyle="--", linewidth=1.5, alpha=0.8)
+    ax.axvline(x=detection_end_in_clip, color="red", linestyle="--", linewidth=1.5, alpha=0.8)
 
     plt.colorbar(im, ax=ax, label="Intensity (dB)")
     plt.tight_layout()
