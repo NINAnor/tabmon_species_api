@@ -246,13 +246,26 @@ def _render_cross_validation_form(record, selections):
         fk = st.session_state.get("review_form_key", 0)
 
         with st.form(f"cross_validation_form_{fk}"):
-            # Update mode toggle — unchecked by default (cross-validation is the norm)
-            is_update_mode = st.checkbox(
-                "✏️ This is an update to my original annotation",
-                value=False,
-                key=f"review_is_update_{fk}",
-                help="Tick this if you are the original validator and are filling in missing information (e.g. vocalization type), not performing a cross-validation.",
+            # Automatically determine update vs. cross-validation from the
+            # original annotator's userID vs. the currently logged-in
+            # reviewer — no manual toggle needed, so submitting only takes
+            # a single click.
+            original_user_id = str(record.get("userID", "")).strip()
+            current_user_id = str(selections.get("user_id", "")).strip()
+            is_update_mode = bool(original_user_id) and (
+                original_user_id == current_user_id
             )
+
+            if is_update_mode:
+                st.info(
+                    "✏️ You are the original validator for this clip — "
+                    "submitting will be recorded as an **update**."
+                )
+            else:
+                st.caption(
+                    "🔄 Submitting will be recorded as a "
+                    "**cross-validation** of another annotator's work."
+                )
 
             # Pre-parse original vocalization types for pre-filling when in update mode
             original_voc_str = str(record.get("vocalization_types", ""))

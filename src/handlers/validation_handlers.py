@@ -83,6 +83,11 @@ def render_pro_validation_form(result, selections):
                 sci: disp for disp, sci in display_name_map.items()
             }
 
+            # Get all available species for autocomplete (used both for the
+            # "Other species not listed above" picker and the clip-level FP
+            # confuser search below)
+            all_species = _get_all_species_list(language_code)
+
             # Display checklist
             selected_species = []
             vocalization_types = {}
@@ -97,7 +102,7 @@ def render_pro_validation_form(result, selections):
                 with col_vocal:
                     vocal_type = st.selectbox(
                         "Vocalization",
-                        options=["", "Call", "Song"],
+                        options=["", "Call", "Song", "Other/Unknown"],
                         key=f"vocal_{idx}_{fk}",
                         label_visibility="collapsed",
                     )
@@ -115,11 +120,73 @@ def render_pro_validation_form(result, selections):
             if none_of_above:
                 selected_species = ["NONE_DETECTED"]
 
-            st.markdown("---")
+            # Clip-level False Positive characterization — applies whenever
+            # one or more BirdNET-detected species were rejected (left
+            # unchecked, or covered by "None of the above"). One block per
+            # clip rather than per species, since the FP source/confuser
+            # typically describes the whole clip, not an individual row.
+            with st.expander("🔬 Characterize as False Positive (optional)"):
+                fp_source = st.selectbox(
+                    "Likely FP source/confuser",
+                    options=[
+                        "— Not a false positive / N/A —",
+                        "Specific bird species (choose below)",
+                        "Other bird (unidentified — describe below)",
+                        "Other animal — Amphibian/Frogs",
+                        "Other animal — Insect/Cricket",
+                        "Other animal — Other Animal",
+                        "Environmental — Rain",
+                        "Environmental — Wind",
+                        "Environmental — Other Environmental Noise",
+                        "Anthropogenic — Aircraft",
+                        "Anthropogenic — Traffic/Car",
+                        "Anthropogenic — Other Anthropogenic",
+                        "Unclear",
+                    ],
+                    key=f"fp_source_{fk}",
+                )
+                fp_species = st.selectbox(
+                    "If 'Specific bird species': which one?",
+                    options=all_species,
+                    index=None,
+                    placeholder="Start typing to search...",
+                    key=f"fp_species_{fk}",
+                )
+                fp_other_bird_text = st.text_input(
+                    "If 'Other bird': describe "
+                    "(e.g. 'lark-type', 'finch-type')",
+                    key=f"fp_other_bird_{fk}",
+                )
+                fp_vocalization = st.selectbox(
+                    "Vocalization of confuser (optional)",
+                    options=["", "Song", "Call", "Other/Unknown"],
+                    key=f"fp_vocal_{fk}",
+                )
+                fp_mechanism = st.selectbox(
+                    "Likely mechanism",
+                    options=[
+                        "",
+                        "Acoustic similarity",
+                        "Partial vocalisation",
+                        "Overlapping signal",
+                        "Low SNR / masking",
+                        "Other / unclear",
+                    ],
+                    key=f"fp_mechanism_{fk}",
+                )
+                fp_certainty = st.radio(
+                    "Certainty",
+                    options=["High", "Medium", "Low"],
+                    index=None,
+                    horizontal=True,
+                    key=f"fp_certainty_{fk}",
+                )
+                fp_comment = st.text_input(
+                    "Comment (optional — exceptional cases only)",
+                    key=f"fp_comment_{fk}",
+                )
 
-            # Get all available species for autocomplete
-            language_code = selections.get("language_code", "Scientific_Name")
-            all_species = _get_all_species_list(language_code)
+            st.markdown("---")
 
             # Additional species input with autocomplete (multiselect)
             other_species_list = st.multiselect(
@@ -153,30 +220,29 @@ def render_pro_validation_form(result, selections):
             # Notes/comments field
             st.markdown("#### 📝 Additional sounds")
 
-            user_notes = []
             noise_classes = [
                 "Loud foreground noise",
-                "Rain",
-                "Wind",
-                "Dog/Bark",
-                "Insect/Cricket",
-                "Amphibian / Frogs",
-                "Construction",
-                "Human Voices",
-                "Traffic/Car",
-                "Aircraft",
-                "Water/Waves",
+                "Environmental — Rain",
+                "Environmental — Wind",
+                "Environmental — Water/Waves",
+                "Environmental — Other Environmental Noise",
+                "Other animal — Dog/Bark",
+                "Other animal — Insect/Cricket",
+                "Other animal — Amphibian/Frogs",
+                "Other animal — Other Animal",
+                "Anthropogenic — Aircraft",
+                "Anthropogenic — Traffic/Car",
+                "Anthropogenic — Construction",
+                "Anthropogenic — Human Voices",
+                "Anthropogenic — Other Anthropogenic",
             ]
-            mid = (len(noise_classes) + 1) // 2
-            nc1, nc2 = st.columns(2)
-            with nc1:
-                for noise in noise_classes[:mid]:
-                    if st.checkbox(noise, key=f"{noise}_{fk}"):
-                        user_notes.append(noise)
-            with nc2:
-                for noise in noise_classes[mid:]:
-                    if st.checkbox(noise, key=f"{noise}_{fk}"):
-                        user_notes.append(noise)
+            user_notes = st.multiselect(
+                "Select any additional background sounds heard in this clip:",
+                options=noise_classes,
+                default=[],
+                placeholder="Start typing to search...",
+                key=f"user_notes_{fk}",
+            )
 
             st.markdown("---")
 
@@ -203,6 +269,16 @@ def render_pro_validation_form(result, selections):
                     user_confidence,
                     user_comments,
                     vocalization_types,
+                    species_data,
+                    {
+                        "fp_source": fp_source,
+                        "fp_species": fp_species,
+                        "fp_other_bird_text": fp_other_bird_text,
+                        "fp_vocalization": fp_vocalization,
+                        "fp_mechanism": fp_mechanism,
+                        "fp_certainty": fp_certainty,
+                        "fp_comment": fp_comment,
+                    },
                 )
 
 
@@ -215,6 +291,8 @@ def _handle_pro_validation_submission(
     user_confidence,
     user_comments,
     vocalization_types,
+    species_data=None,
+    fp_form_data=None,
 ):
     """Handle Expert mode validation form submission."""
     if not user_confidence:
@@ -269,7 +347,73 @@ def _handle_pro_validation_submission(
         "timestamp": pd.Timestamp.now(),
     }
 
-    # Save validation response
+    # Clip-level False Positive characterization. Applies to all
+    # BirdNET-detected species that were rejected in this clip (left
+    # unchecked, or covered by "None of the above"). Left blank when the
+    # FP block wasn't filled in, so TP-only submissions simply have empty
+    # fp_* columns in the same output file.
+    fp_source = (fp_form_data or {}).get("fp_source", "")
+    rejected_species = [
+        (species, conf_val)
+        for species, conf_val in (species_data or [])
+        if species not in selected_species
+    ]
+    is_fp_characterized = bool(rejected_species) and fp_source not in (
+        "",
+        "— Not a false positive / N/A —",
+    )
+
+    fp_category, fp_detail = "", ""
+    if is_fp_characterized:
+        if fp_source.startswith("Specific bird species"):
+            fp_category = "Bird"
+            fp_detail = fp_form_data.get("fp_species") or ""
+        elif fp_source.startswith("Other bird"):
+            fp_category = "Other bird"
+            fp_detail = fp_form_data.get("fp_other_bird_text") or ""
+        elif " — " in fp_source:
+            fp_category, fp_detail = fp_source.split(" — ", 1)
+        else:
+            fp_category, fp_detail = fp_source, ""
+
+    validation_data.update(
+        {
+            "fp_target_species": (
+                [species for species, _ in rejected_species]
+                if is_fp_characterized
+                else []
+            ),
+            "fp_target_species_confidence": (
+                [conf_val for _, conf_val in rejected_species]
+                if is_fp_characterized
+                else []
+            ),
+            "fp_source_category": fp_category,
+            "fp_source_detail": fp_detail,
+            "fp_confuser_vocalization": (
+                (fp_form_data or {}).get("fp_vocalization", "")
+                if is_fp_characterized
+                else ""
+            ),
+            "fp_likely_mechanism": (
+                (fp_form_data or {}).get("fp_mechanism", "")
+                if is_fp_characterized
+                else ""
+            ),
+            "fp_certainty": (
+                ((fp_form_data or {}).get("fp_certainty") or "")
+                if is_fp_characterized
+                else ""
+            ),
+            "fp_comment": (
+                (fp_form_data or {}).get("fp_comment", "")
+                if is_fp_characterized
+                else ""
+            ),
+        }
+    )
+
+    # Save validation response (includes FP characterization columns)
     from utils import save_pro_validation_response
 
     save_pro_validation_response(validation_data)

@@ -131,6 +131,12 @@ def save_pro_validation_response(validation_data):
         "user_notes": list_to_string(validation_data.get("user_notes")),
         "is_cross_validation": validation_data.get("is_cross_validation", False),
         "is_update": validation_data.get("is_update", False),
+        "fp_target_species": list_to_string(
+            validation_data.get("fp_target_species")
+        ),
+        "fp_target_species_confidence": list_to_string(
+            validation_data.get("fp_target_species_confidence")
+        ),
     }
 
     validation_df = pd.DataFrame([validation_data_copy])
