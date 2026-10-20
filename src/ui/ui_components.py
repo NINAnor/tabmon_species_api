@@ -54,6 +54,15 @@ def render_pro_help_section():
 - **Low Confidence:** Difficult to identify, background noise, or distant calls
 """)
 
+    with st.expander("⌨️ Keyboard Shortcuts", expanded=False):
+        st.markdown("""
+- **Ctrl+1** — Toggle the top (highest-confidence) species
+- **Ctrl+2** — Toggle the second species
+- **Ctrl+3** — Toggle "None of the above"
+- **Ctrl+Enter** — Submit the validation
+- **Ctrl+Right** — Load next clip (skip)
+""")
+
 
 def render_pro_clip_section(result, selections):
     """
@@ -134,7 +143,11 @@ def _prefetch_next_clip_audio():
 
 def render_pro_load_new_button():
     """Render the load new detection button for Expert mode."""
-    if st.button("🔄 Load Next Clip", help="Get the next assigned clip to annotate"):
+    if st.button(
+        "🔄 Load Next Clip",
+        help="Get the next assigned clip to annotate",
+        shortcut="Ctrl+Right",
+    ):
         # Add current clip to skipped set so it won't be shown again
         current_clip = st.session_state.get("expert_current_clip")
         if current_clip and not current_clip.get("all_validated"):

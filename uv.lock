@@ -2216,6 +2216,18 @@ wheels = [
 ]
 
 [[package]]
+name = "streamlit-shortcuts"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "streamlit" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/73/32/e1c7440408fa9ec39b4970276aa549744ed358ffec561c26374ac7024085/streamlit_shortcuts-1.2.2.tar.gz", hash = "sha256:4f195f3c1577f26081c265633a02f5fa9784f2d7b1dd94c2ba4b3559cef68bd1", size = 112626 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/0f/da939071eb3a653f362040a85cfd0d1d2b99e37f1768009d08c27a735d2e/streamlit_shortcuts-1.2.2-py3-none-any.whl", hash = "sha256:7b8668432bc39478b2e4ca68d21acfd7c853966951251c21f177eb2bece3c3b4", size = 7055 },
+]
+
+[[package]]
 name = "tabmon-species-api"
 version = "0.1.0"
 source = { virtual = "." }
@@ -2232,6 +2244,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "python-dotenv" },
     { name = "streamlit" },
+    { name = "streamlit-shortcuts" },
 ]
 
 [package.dev-dependencies]
@@ -2252,6 +2265,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=14.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "streamlit", specifier = ">=1.52.2" },
+    { name = "streamlit-shortcuts", specifier = ">=1.2.2" },
 ]
 
 [package.metadata.requires-dev]

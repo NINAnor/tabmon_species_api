@@ -11,6 +11,7 @@ from handlers.review_handlers import render_review_filters
 from handlers.selection_handlers import get_pro_user_selections
 from handlers.validation_handlers import render_pro_validation_form
 from session.session_manager import get_or_load_pro_clip, initialize_pro_session
+from ui.review_components import render_review_clip_section
 from ui.ui_components import (
     render_pro_all_validated_placeholder,
     render_pro_clip_section,
@@ -18,7 +19,6 @@ from ui.ui_components import (
     render_pro_help_section,
     render_pro_page_header,
 )
-from ui.review_components import render_review_clip_section
 from ui.ui_utils import setup_page_config
 
 

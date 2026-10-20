@@ -2,6 +2,7 @@
 
 import pandas as pd
 import streamlit as st
+from streamlit_shortcuts import add_shortcuts
 
 from utils import get_species_display_names, load_species_translations
 
@@ -120,6 +121,18 @@ def render_pro_validation_form(result, selections):
             if none_of_above:
                 selected_species = ["NONE_DETECTED"]
 
+            # Keyboard shortcuts: Ctrl+1 / Ctrl+2 toggle the top two species
+            # checkboxes, Ctrl+3 toggles "None of the above". Guarded so we
+            # never reference a checkbox key that doesn't exist for clips
+            # with fewer than 2 BirdNET detections.
+            shortcut_bindings = {}
+            if len(species_data) >= 1:
+                shortcut_bindings[f"species_0_{fk}"] = "ctrl+1"
+            if len(species_data) >= 2:
+                shortcut_bindings[f"species_1_{fk}"] = "ctrl+2"
+            shortcut_bindings[f"none_of_above_{fk}"] = "ctrl+3"
+            add_shortcuts(**shortcut_bindings)
+
             # Clip-level False Positive characterization — applies whenever
             # one or more BirdNET-detected species were rejected (left
             # unchecked, or covered by "None of the above"). One block per
@@ -146,7 +159,7 @@ def render_pro_validation_form(result, selections):
                     key=f"fp_source_{fk}",
                 )
                 fp_species = st.selectbox(
-                    "If 'Specific bird species': which one?",
+                    "If 'Specific bird species': which species?",
                     options=all_species,
                     index=None,
                     placeholder="Start typing to search...",
@@ -154,29 +167,30 @@ def render_pro_validation_form(result, selections):
                 )
                 fp_other_bird_text = st.text_input(
                     "If 'Other bird': describe "
-                    "(e.g. 'lark-type', 'finch-type')",
+                    "(e.g. 'lark, sparrow, finch, etc.')",
                     key=f"fp_other_bird_{fk}",
                 )
                 fp_vocalization = st.selectbox(
-                    "Vocalization of confuser (optional)",
+                    "Vocalization type of confuser (optional)",
                     options=["", "Song", "Call", "Other/Unknown"],
                     key=f"fp_vocal_{fk}",
                 )
-                fp_mechanism = st.selectbox(
-                    "Likely mechanism",
-                    options=[
-                        "",
-                        "Acoustic similarity",
-                        "Partial vocalisation",
-                        "Overlapping signal",
-                        "Low SNR / masking",
-                        "Other / unclear",
-                    ],
-                    key=f"fp_mechanism_{fk}",
-                )
+                st.markdown("**Likely confusion mechanism:**")
+                mechanism_options = [
+                    "Acoustic similarity",
+                    "Partial vocalisation",
+                    "Overlapping signal",
+                    "Low SNR / masking",
+                    "Other / unclear",
+                ]
+                fp_mechanism = [
+                    mechanism
+                    for mechanism in mechanism_options
+                    if st.checkbox(mechanism, key=f"fp_mechanism_{mechanism}_{fk}")
+                ]
                 fp_certainty = st.radio(
                     "Certainty",
-                    options=["High", "Medium", "Low"],
+                    options=["Low", "Medium", "High"],
                     index=None,
                     horizontal=True,
                     key=f"fp_certainty_{fk}",
@@ -212,7 +226,10 @@ def render_pro_validation_form(result, selections):
             )
 
             submitted = st.form_submit_button(
-                "✅ Submit Validation", type="primary", use_container_width=True
+                "✅ Submit Validation",
+                type="primary",
+                use_container_width=True,
+                shortcut="Ctrl+Enter",
             )
 
             st.markdown("---")
@@ -299,6 +316,49 @@ def _handle_pro_validation_submission(
         st.error("Please rate your confidence before submitting.")
         return
 
+    # --- FP characterization consistency checks (prevent silent data loss) ---
+    # The FP block's fields are only saved if the "Likely FP source/confuser"
+    # dropdown is set AND at least one species was left unconfirmed. If either
+    # holds without the other, block submission instead of silently dropping
+    # whatever the annotator filled in.
+    fp_source = (fp_form_data or {}).get("fp_source", "")
+    fp_source_is_set = fp_source not in ("", "— Not a false positive / N/A —")
+    rejected_species = [
+        (species, conf_val)
+        for species, conf_val in (species_data or [])
+        if species not in selected_species
+    ]
+    fp_any_other_field_filled = any(
+        [
+            (fp_form_data or {}).get("fp_vocalization"),
+            (fp_form_data or {}).get("fp_mechanism"),
+            (fp_form_data or {}).get("fp_certainty"),
+            ((fp_form_data or {}).get("fp_comment") or "").strip(),
+            (fp_form_data or {}).get("fp_species"),
+            ((fp_form_data or {}).get("fp_other_bird_text") or "").strip(),
+        ]
+    )
+
+    if fp_source_is_set and not rejected_species:
+        st.error(
+            "🔬 You selected a 'Likely FP source/confuser' but every listed "
+            "species is still confirmed. Uncheck the species this applies "
+            "to (or check 'None of the above'), or reset the FP source back "
+            "to '— Not a false positive / N/A —' if this clip isn't a false "
+            "positive."
+        )
+        return
+
+    if not fp_source_is_set and fp_any_other_field_filled:
+        st.error(
+            "🔬 You've filled in False Positive details but haven't selected "
+            "a 'Likely FP source/confuser'. Please select one, or clear the "
+            "False Positive fields if this clip isn't a false positive."
+        )
+        return
+
+    is_fp_characterized = fp_source_is_set and bool(rejected_species)
+
     # Extract scientific names from multiselect
     # Format: "Common Name (Scientific Name)"
     additional_species = [
@@ -352,22 +412,20 @@ def _handle_pro_validation_submission(
     # unchecked, or covered by "None of the above"). Left blank when the
     # FP block wasn't filled in, so TP-only submissions simply have empty
     # fp_* columns in the same output file.
-    fp_source = (fp_form_data or {}).get("fp_source", "")
-    rejected_species = [
-        (species, conf_val)
-        for species, conf_val in (species_data or [])
-        if species not in selected_species
-    ]
-    is_fp_characterized = bool(rejected_species) and fp_source not in (
-        "",
-        "— Not a false positive / N/A —",
-    )
-
     fp_category, fp_detail = "", ""
     if is_fp_characterized:
         if fp_source.startswith("Specific bird species"):
             fp_category = "Bird"
-            fp_detail = fp_form_data.get("fp_species") or ""
+            # Parse "Common Name (Scientific Name)" back to pure scientific
+            # name, same as the "Other species not listed above" field, so
+            # fp_source_detail stays consistent with fp_target_species
+            # regardless of the selected display language.
+            raw_fp_species = fp_form_data.get("fp_species") or ""
+            fp_detail = (
+                raw_fp_species.split(" (")[-1].rstrip(")")
+                if " (" in raw_fp_species and raw_fp_species.endswith(")")
+                else raw_fp_species
+            )
         elif fp_source.startswith("Other bird"):
             fp_category = "Other bird"
             fp_detail = fp_form_data.get("fp_other_bird_text") or ""
@@ -396,9 +454,9 @@ def _handle_pro_validation_submission(
                 else ""
             ),
             "fp_likely_mechanism": (
-                (fp_form_data or {}).get("fp_mechanism", "")
+                (fp_form_data or {}).get("fp_mechanism", [])
                 if is_fp_characterized
-                else ""
+                else []
             ),
             "fp_certainty": (
                 ((fp_form_data or {}).get("fp_certainty") or "")
@@ -425,5 +483,4 @@ def _handle_pro_validation_submission(
     st.session_state.expert_form_key = st.session_state.get("expert_form_key", 0) + 1
 
     st.toast("✅ Annotation saved! Loading next clip...")
-    st.rerun()
     st.rerun()

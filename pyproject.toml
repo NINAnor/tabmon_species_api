@@ -20,7 +20,8 @@ dependencies = [
   "pandas>=2.0.0",
   "pyarrow>=14.0.0",
   "python-dotenv>=1.2.1",
-  "streamlit>=1.52.2"
+  "streamlit>=1.52.2",
+  "streamlit-shortcuts>=1.2.2",
 ]
 description = ""
 license = "GPL-3.0+"
@@ -29,13 +30,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 version = "0.1.0"
 
-[project.scripts]
-tabmon-species-api = "main:start"
-
 [tool.deptry]
 # Ignore local modules and unused deps
 ignore = ["DEP001", "DEP002"]
-known_first_party = ["config", "queries", "utils"]
+known_first_party = ["config", "utils"]
 
 [tool.ruff]
 fix = true

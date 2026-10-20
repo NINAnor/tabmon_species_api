@@ -137,6 +137,9 @@ def save_pro_validation_response(validation_data):
         "fp_target_species_confidence": list_to_string(
             validation_data.get("fp_target_species_confidence")
         ),
+        "fp_likely_mechanism": list_to_string(
+            validation_data.get("fp_likely_mechanism")
+        ),
     }
 
     validation_df = pd.DataFrame([validation_data_copy])

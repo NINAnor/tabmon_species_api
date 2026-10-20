@@ -38,7 +38,7 @@ def render_review_filters(dataset_path, language_code):
             min_date = validations_df["recording_date"].min()
             max_date = validations_df["recording_date"].max()
 
-            if min_date is not None and max_date is not None and not (hasattr(min_date, 'year') and min_date != min_date):
+            if min_date is not None and max_date is not None and not (hasattr(min_date, "year") and min_date != min_date):
                 date_range = st.date_input(
                     "🗓️ Date range",
                     value=(min_date, max_date),

@@ -5,12 +5,12 @@ import os
 import pandas as pd
 import streamlit as st
 
+from handlers.validation_handlers import _get_all_species_list
 from ui.ui_utils import (
     _generate_spectrogram_image,
     render_audio_player,
     render_clip_metadata,
 )
-from handlers.validation_handlers import _get_all_species_list
 from utils import extract_clip, get_species_display_names, save_pro_validation_response
 
 
@@ -192,6 +192,66 @@ def _render_original_validation(record, selections):
         user_comments = str(record.get("user_comments", ""))
         if user_comments and user_comments != "nan" and user_comments.strip():
             st.info(f"💬 {user_comments}")
+
+        # False Positive characterization (if this clip was characterized
+        # as a FP during the primary validation pass)
+        fp_source_category = str(record.get("fp_source_category", "")).strip()
+        if fp_source_category and fp_source_category != "nan":
+            st.markdown("---")
+            st.markdown("**🔬 False Positive Characterization:**")
+
+            fp_source_detail = str(record.get("fp_source_detail", "")).strip()
+            fp_source_detail = "" if fp_source_detail == "nan" else fp_source_detail
+
+            if fp_source_category == "Bird" and fp_source_detail:
+                detail_display_map = get_species_display_names(
+                    [fp_source_detail], language_code
+                )
+                detail_to_display = {
+                    sci: disp for disp, sci in detail_display_map.items()
+                }
+                source_display = (
+                    f"Specific bird species — "
+                    f"{detail_to_display.get(fp_source_detail, fp_source_detail)}"
+                )
+            elif fp_source_detail:
+                source_display = f"{fp_source_category} — {fp_source_detail}"
+            else:
+                source_display = fp_source_category
+            st.markdown(f"- **Source/confuser:** {source_display}")
+
+            fp_target_str = str(record.get("fp_target_species", "")).strip()
+            if fp_target_str and fp_target_str != "nan":
+                fp_targets = [s.strip() for s in fp_target_str.split("|") if s.strip()]
+                target_display_map = get_species_display_names(
+                    fp_targets, language_code
+                )
+                target_to_display = {
+                    sci: disp for disp, sci in target_display_map.items()
+                }
+                targets_display = ", ".join(
+                    target_to_display.get(sp, sp) for sp in fp_targets
+                )
+                st.markdown(f"- **Rejected species (confused for):** {targets_display}")
+
+            fp_vocal = str(record.get("fp_confuser_vocalization", "")).strip()
+            if fp_vocal and fp_vocal != "nan":
+                st.markdown(f"- **Confuser vocalization type:** {fp_vocal}")
+
+            fp_mechanism_str = str(record.get("fp_likely_mechanism", "")).strip()
+            if fp_mechanism_str and fp_mechanism_str != "nan":
+                st.markdown(
+                    f"- **Likely confusion mechanism(s):** "
+                    f"{fp_mechanism_str.replace('|', ', ')}"
+                )
+
+            fp_certainty = str(record.get("fp_certainty", "")).strip()
+            if fp_certainty and fp_certainty != "nan":
+                st.markdown(f"- **Certainty:** {fp_certainty}")
+
+            fp_comment = str(record.get("fp_comment", "")).strip()
+            if fp_comment and fp_comment != "nan":
+                st.info(f"💬 FP comment: {fp_comment}")
 
         # Cross-validation indicator
         is_cross = record.get("is_cross_validation", False)
