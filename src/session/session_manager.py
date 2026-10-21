@@ -24,6 +24,9 @@ def initialize_pro_session():
             "validated_clips_session": set(),
             "skipped_clips_session": set(),
             "remaining_count": None,
+            "last_submitted_clip": None,
+            "last_submission_fields": None,
+            "is_fixing": False,
         },
     )
     initialize_review_session()
@@ -51,6 +54,9 @@ def clear_pro_clip_state():
     st.session_state.expert_skipped_clips_session = set()
     st.session_state.expert_remaining_count = None
     st.session_state.expert_clip_queue = []
+    st.session_state.expert_last_submitted_clip = None
+    st.session_state.expert_last_submission_fields = None
+    st.session_state.expert_is_fixing = False
 
     from database.queries import get_remaining_pro_clips_count, get_validated_pro_clips
 

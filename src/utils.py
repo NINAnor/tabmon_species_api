@@ -181,8 +181,11 @@ def save_pro_validation_response(validation_data):
         clip_key = (validation_data["filename"], validation_data["start_time"])
         st.session_state.expert_validated_clips_session.add(clip_key)
 
+        # A "fix" resubmission (is_update=True) corrects an already-counted
+        # clip, so it shouldn't decrement the remaining-count a second time.
         if (
-            "expert_remaining_count" in st.session_state
+            not validation_data.get("is_update", False)
+            and "expert_remaining_count" in st.session_state
             and st.session_state.expert_remaining_count is not None
         ):
             st.session_state.expert_remaining_count = max(

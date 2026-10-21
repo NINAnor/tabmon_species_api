@@ -117,7 +117,12 @@ def render_pro_clip_section(result, selections):
         render_clip_metadata(result)
         render_audio_player(clip)
         render_spectrogram(full_path, result["start_time"], expanded=True, context_seconds=context_seconds)
-        render_pro_load_new_button()
+
+        col_next, col_fix = st.columns(2)
+        with col_next:
+            render_pro_load_new_button()
+        with col_fix:
+            render_pro_fix_last_submission_button()
 
     # Prefetch the next clip's audio and spectrogram into cache
     _prefetch_next_clip_audio()
@@ -162,6 +167,9 @@ def render_pro_load_new_button():
                 )
 
         st.session_state.expert_current_clip = None
+        # Abandon any pending "fix" so a later submission isn't mis-tagged
+        # as a correction.
+        st.session_state.expert_is_fixing = False
 
         # Increment form key to reset validation form fields
         st.session_state.expert_form_key = (
@@ -178,6 +186,33 @@ def render_pro_load_new_button():
             get_validated_pro_clips,
             get_assigned_clips_for_user,
             get_remaining_pro_clips_count,
+        )
+        st.rerun()
+
+
+def render_pro_fix_last_submission_button():
+    """Render a button to reload and correct the most recently submitted clip.
+
+    Only shown if a submission exists this session. Reloads that exact clip
+    with a fresh, pre-filled form; resubmitting appends a new row flagged
+    `is_update=True` rather than overwriting the original submission.
+    """
+    last_clip = st.session_state.get("expert_last_submitted_clip")
+    if not last_clip:
+        return
+
+    if st.button(
+        "↩️ Fix My Last Submission",
+        help=(
+            "Reopen the clip you just submitted to correct a mistake. This "
+            "adds a new, corrected row — it doesn't delete your original "
+            "submission."
+        ),
+    ):
+        st.session_state.expert_current_clip = last_clip
+        st.session_state.expert_is_fixing = True
+        st.session_state.expert_form_key = (
+            st.session_state.get("expert_form_key", 0) + 1
         )
         st.rerun()
 

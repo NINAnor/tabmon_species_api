@@ -50,6 +50,17 @@ def render_pro_validation_form(result, selections):
 
         fk = st.session_state.get("expert_form_key", 0)
 
+        # If the annotator clicked "Fix My Last Submission", pre-fill every
+        # widget below with whatever was submitted last time, so they only
+        # need to change the one thing they got wrong.
+        is_fixing = st.session_state.get("expert_is_fixing", False)
+        last_fields = (
+            (st.session_state.get("expert_last_submission_fields") or {})
+            if is_fixing
+            else {}
+        )
+        last_fp = last_fields.get("fp_form_data") or {}
+
         with st.form(f"expert_validation_form_{fk}"):
             st.markdown("#### Species detected by BirdNET in this clip:")
             st.markdown("**Select which species you can actually hear:**")
@@ -95,18 +106,29 @@ def render_pro_validation_form(result, selections):
             # for marking presence without committing to Call/Song.
             species_only_selected = []
             vocalization_types = {}
+            prefilled_species = last_fields.get("species_only_selected", [])
+            prefilled_vocal_types = last_fields.get("vocalization_types", {})
+            voc_options = ["", "Call", "Song", "Other/Unknown"]
             for idx, (species, conf_val) in enumerate(species_data):
                 display_name = scientific_to_display.get(species, species)
                 col_check, col_vocal = st.columns([3, 2])
                 with col_check:
                     checked = st.checkbox(
                         f"{display_name} (Birdnet conf: {conf_val:.2f})",
+                        value=species in prefilled_species,
                         key=f"species_{idx}_{fk}",
                     )
                 with col_vocal:
+                    prefilled_voc = prefilled_vocal_types.get(species, "")
+                    voc_index = (
+                        voc_options.index(prefilled_voc)
+                        if prefilled_voc in voc_options
+                        else 0
+                    )
                     vocal_type = st.selectbox(
                         "Vocalization",
-                        options=["", "Call", "Song", "Other/Unknown"],
+                        options=voc_options,
+                        index=voc_index,
                         key=f"vocal_{idx}_{fk}",
                         label_visibility="collapsed",
                     )
@@ -117,12 +139,14 @@ def render_pro_validation_form(result, selections):
 
             none_of_above = st.checkbox(
                 "❌ None of the above species are present",
+                value=last_fields.get("none_of_above", False),
                 key=f"none_of_above_{fk}",
                 help="Check this if you cannot hear any bird in this clip at all",
             )
 
             unidentified_bird = st.checkbox(
                 "🤷 A bird is present but I can't determine the species",
+                value=last_fields.get("unidentified_bird", False),
                 key=f"unidentified_bird_{fk}",
                 help=(
                     "Check this if you can hear a bird call/song but cannot "
@@ -150,40 +174,60 @@ def render_pro_validation_form(result, selections):
             # clip rather than per species, since the FP source/confuser
             # typically describes the whole clip, not an individual row.
             with st.expander("🔬 Characterize as False Positive (optional)"):
+                fp_source_options = [
+                    "— Not a false positive / N/A —",
+                    "Specific bird species (choose below)",
+                    "Other bird (unidentified — describe below)",
+                    "Other animal — Amphibian/Frogs",
+                    "Other animal — Insect/Cricket",
+                    "Other animal — Other Animal",
+                    "Environmental — Rain",
+                    "Environmental — Wind",
+                    "Environmental — Other Environmental Noise",
+                    "Anthropogenic — Aircraft",
+                    "Anthropogenic — Traffic/Car",
+                    "Anthropogenic — Other Anthropogenic",
+                    "Unclear",
+                ]
+                prefilled_fp_source = last_fp.get("fp_source", "")
                 fp_source = st.selectbox(
                     "Likely FP source/confuser",
-                    options=[
-                        "— Not a false positive / N/A —",
-                        "Specific bird species (choose below)",
-                        "Other bird (unidentified — describe below)",
-                        "Other animal — Amphibian/Frogs",
-                        "Other animal — Insect/Cricket",
-                        "Other animal — Other Animal",
-                        "Environmental — Rain",
-                        "Environmental — Wind",
-                        "Environmental — Other Environmental Noise",
-                        "Anthropogenic — Aircraft",
-                        "Anthropogenic — Traffic/Car",
-                        "Anthropogenic — Other Anthropogenic",
-                        "Unclear",
-                    ],
+                    options=fp_source_options,
+                    index=(
+                        fp_source_options.index(prefilled_fp_source)
+                        if prefilled_fp_source in fp_source_options
+                        else 0
+                    ),
                     key=f"fp_source_{fk}",
                 )
+                prefilled_fp_species = last_fp.get("fp_species")
                 fp_species = st.selectbox(
                     "If 'Specific bird species': which species?",
                     options=all_species,
-                    index=None,
+                    index=(
+                        all_species.index(prefilled_fp_species)
+                        if prefilled_fp_species in all_species
+                        else None
+                    ),
                     placeholder="Start typing to search...",
                     key=f"fp_species_{fk}",
                 )
                 fp_other_bird_text = st.text_input(
                     "If 'Other bird': describe "
                     "(e.g. 'lark, sparrow, finch, etc.')",
+                    value=last_fp.get("fp_other_bird_text", ""),
                     key=f"fp_other_bird_{fk}",
                 )
+                fp_vocal_options = ["", "Song", "Call", "Other/Unknown"]
+                prefilled_fp_vocal = last_fp.get("fp_vocalization", "")
                 fp_vocalization = st.selectbox(
                     "Vocalization type of confuser (optional)",
-                    options=["", "Song", "Call", "Other/Unknown"],
+                    options=fp_vocal_options,
+                    index=(
+                        fp_vocal_options.index(prefilled_fp_vocal)
+                        if prefilled_fp_vocal in fp_vocal_options
+                        else 0
+                    ),
                     key=f"fp_vocal_{fk}",
                 )
                 st.markdown("**Likely confusion mechanism:**")
@@ -194,20 +238,32 @@ def render_pro_validation_form(result, selections):
                     "Low SNR / masking",
                     "Other / unclear",
                 ]
+                prefilled_mechanisms = last_fp.get("fp_mechanism", [])
                 fp_mechanism = [
                     mechanism
                     for mechanism in mechanism_options
-                    if st.checkbox(mechanism, key=f"fp_mechanism_{mechanism}_{fk}")
+                    if st.checkbox(
+                        mechanism,
+                        value=mechanism in prefilled_mechanisms,
+                        key=f"fp_mechanism_{mechanism}_{fk}",
+                    )
                 ]
+                fp_certainty_options = ["Low", "Medium", "High"]
+                prefilled_fp_certainty = last_fp.get("fp_certainty")
                 fp_certainty = st.radio(
                     "Certainty",
-                    options=["Low", "Medium", "High"],
-                    index=None,
+                    options=fp_certainty_options,
+                    index=(
+                        fp_certainty_options.index(prefilled_fp_certainty)
+                        if prefilled_fp_certainty in fp_certainty_options
+                        else None
+                    ),
                     horizontal=True,
                     key=f"fp_certainty_{fk}",
                 )
                 fp_comment = st.text_input(
                     "Comment (optional — exceptional cases only)",
+                    value=last_fp.get("fp_comment", ""),
                     key=f"fp_comment_{fk}",
                 )
 
@@ -217,7 +273,7 @@ def render_pro_validation_form(result, selections):
             other_species_list = st.multiselect(
                 "**Other species not listed above:**",
                 options=all_species,
-                default=[],
+                default=last_fields.get("other_species_list", []),
                 help=(
                     "Search and select additional species not in the "
                     "checklist above. Note vocalization type (Call/Song) in "
@@ -230,10 +286,16 @@ def render_pro_validation_form(result, selections):
             st.markdown("---")
 
             # Confidence rating
+            confidence_options = ["Low", "Moderate", "High"]
+            prefilled_confidence = last_fields.get("user_confidence")
             user_confidence = st.radio(
                 "**How confident are you in your annotations?**",
-                options=["Low", "Moderate", "High"],
-                index=None,
+                options=confidence_options,
+                index=(
+                    confidence_options.index(prefilled_confidence)
+                    if prefilled_confidence in confidence_options
+                    else None
+                ),
                 horizontal=True,
                 help=(
                     "Rate your overall confidence in the species identifications above"
@@ -262,16 +324,25 @@ def render_pro_validation_form(result, selections):
                 "Human Voices",
                 "Other Anthropogenic",
             ]
+            prefilled_notes = last_fields.get("user_notes", [])
             user_notes = []
             mid = (len(noise_classes) + 1) // 2
             nc1, nc2 = st.columns(2)
             with nc1:
                 for noise in noise_classes[:mid]:
-                    if st.checkbox(noise, key=f"noise_{noise}_{fk}"):
+                    if st.checkbox(
+                        noise,
+                        value=noise in prefilled_notes,
+                        key=f"noise_{noise}_{fk}",
+                    ):
                         user_notes.append(noise)
             with nc2:
                 for noise in noise_classes[mid:]:
-                    if st.checkbox(noise, key=f"noise_{noise}_{fk}"):
+                    if st.checkbox(
+                        noise,
+                        value=noise in prefilled_notes,
+                        key=f"noise_{noise}_{fk}",
+                    ):
                         user_notes.append(noise)
 
             st.markdown("---")
@@ -280,6 +351,7 @@ def render_pro_validation_form(result, selections):
             st.markdown("#### 💬 Comments")
             user_comments = st.text_area(
                 "Add any additional comments or observations:",
+                value=last_fields.get("user_comments", ""),
                 placeholder=(
                     "E.g., 'Faint call in background', "
                     "'Multiple individuals', "
@@ -339,6 +411,9 @@ def _handle_pro_validation_submission(
     if not user_confidence:
         st.error("Please rate your confidence before submitting.")
         return
+
+    # Was this submission a correction via "Fix My Last Submission"?
+    is_fixing = st.session_state.get("expert_is_fixing", False)
 
     # --- Primary identification consistency check (prevent ambiguous /
     # incomplete submissions) ---
@@ -460,6 +535,8 @@ def _handle_pro_validation_submission(
         "user_notes": user_notes,
         "user_comments": user_comments,
         "timestamp": pd.Timestamp.now(),
+        "is_update": is_fixing,
+        "is_cross_validation": False,
     }
 
     # Clip-level False Positive characterization. Applies to all
@@ -531,11 +608,31 @@ def _handle_pro_validation_submission(
 
     save_pro_validation_response(validation_data)
 
+    # Remember this submission so "Fix My Last Submission" can reload and
+    # pre-fill it later. Overwrites whatever was remembered before, so only
+    # the single most recent submission can be fixed at a time.
+    st.session_state.expert_last_submitted_clip = result
+    st.session_state.expert_last_submission_fields = {
+        "species_only_selected": species_only_selected,
+        "vocalization_types": vocalization_types,
+        "none_of_above": none_of_above,
+        "unidentified_bird": unidentified_bird,
+        "other_species_list": other_species_list,
+        "user_confidence": user_confidence,
+        "user_notes": user_notes,
+        "user_comments": user_comments,
+        "fp_form_data": fp_form_data,
+    }
+    st.session_state.expert_is_fixing = False
+
     # Clear current clip to force loading a new one
     st.session_state.expert_current_clip = None
 
     # Increment form key to reset all form fields
     st.session_state.expert_form_key = st.session_state.get("expert_form_key", 0) + 1
 
-    st.toast("✅ Annotation saved! Loading next clip...")
+    if is_fixing:
+        st.toast("✅ Correction saved! Loading next clip...")
+    else:
+        st.toast("✅ Annotation saved! Loading next clip...")
     st.rerun()
