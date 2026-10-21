@@ -89,8 +89,11 @@ def render_pro_validation_form(result, selections):
             # confuser search below)
             all_species = _get_all_species_list(language_code)
 
-            # Display checklist
-            selected_species = []
+            # Display checklist. Picking a vocalization type alone (without
+            # also checking the box) is enough to mark a species present —
+            # the checkbox remains available for Ctrl+1/Ctrl+2 shortcuts and
+            # for marking presence without committing to Call/Song.
+            species_only_selected = []
             vocalization_types = {}
             for idx, (species, conf_val) in enumerate(species_data):
                 display_name = scientific_to_display.get(species, species)
@@ -107,30 +110,38 @@ def render_pro_validation_form(result, selections):
                         key=f"vocal_{idx}_{fk}",
                         label_visibility="collapsed",
                     )
-                if checked:
-                    selected_species.append(species)
+                if checked or vocal_type:
+                    species_only_selected.append(species)
                     if vocal_type:
                         vocalization_types[species] = vocal_type
 
             none_of_above = st.checkbox(
                 "❌ None of the above species are present",
                 key=f"none_of_above_{fk}",
-                help="Check this if you cannot hear any of the species listed above",
+                help="Check this if you cannot hear any bird in this clip at all",
             )
 
-            if none_of_above:
-                selected_species = ["NONE_DETECTED"]
+            unidentified_bird = st.checkbox(
+                "🤷 A bird is present but I can't determine the species",
+                key=f"unidentified_bird_{fk}",
+                help=(
+                    "Check this if you can hear a bird call/song but cannot "
+                    "match it to any specific species"
+                ),
+            )
 
             # Keyboard shortcuts: Ctrl+1 / Ctrl+2 toggle the top two species
-            # checkboxes, Ctrl+3 toggles "None of the above". Guarded so we
-            # never reference a checkbox key that doesn't exist for clips
-            # with fewer than 2 BirdNET detections.
+            # checkboxes, Ctrl+3 toggles "None of the above", Ctrl+4 toggles
+            # "Unidentified bird present". Guarded so we never reference a
+            # checkbox key that doesn't exist for clips with fewer than 2
+            # BirdNET detections.
             shortcut_bindings = {}
             if len(species_data) >= 1:
                 shortcut_bindings[f"species_0_{fk}"] = "ctrl+1"
             if len(species_data) >= 2:
                 shortcut_bindings[f"species_1_{fk}"] = "ctrl+2"
             shortcut_bindings[f"none_of_above_{fk}"] = "ctrl+3"
+            shortcut_bindings[f"unidentified_bird_{fk}"] = "ctrl+4"
             add_shortcuts(**shortcut_bindings)
 
             # Clip-level False Positive characterization — applies whenever
@@ -207,7 +218,11 @@ def render_pro_validation_form(result, selections):
                 "**Other species not listed above:**",
                 options=all_species,
                 default=[],
-                help="Search and select additional species not in the checklist above",
+                help=(
+                    "Search and select additional species not in the "
+                    "checklist above. Note vocalization type (Call/Song) in "
+                    "the Comments field below if relevant."
+                ),
                 placeholder="Start typing to search...",
                 key=f"other_species_{fk}",
             )
@@ -225,41 +240,39 @@ def render_pro_validation_form(result, selections):
                 ),
             )
 
-            submitted = st.form_submit_button(
-                "✅ Submit Validation",
-                type="primary",
-                use_container_width=True,
-                shortcut="Ctrl+Enter",
-            )
-
             st.markdown("---")
 
-            # Notes/comments field
+            # Notes/comments field — plain checkbox grid (no dropdown/popover)
+            # so annotators can tick sounds in a single click each.
             st.markdown("#### 📝 Additional sounds")
 
             noise_classes = [
                 "Loud foreground noise",
-                "Environmental — Rain",
-                "Environmental — Wind",
-                "Environmental — Water/Waves",
-                "Environmental — Other Environmental Noise",
-                "Other animal — Dog/Bark",
-                "Other animal — Insect/Cricket",
-                "Other animal — Amphibian/Frogs",
-                "Other animal — Other Animal",
-                "Anthropogenic — Aircraft",
-                "Anthropogenic — Traffic/Car",
-                "Anthropogenic — Construction",
-                "Anthropogenic — Human Voices",
-                "Anthropogenic — Other Anthropogenic",
+                "Rain",
+                "Wind",
+                "Water/Waves",
+                "Other Environmental Noise",
+                "Dog/Bark",
+                "Insect/Cricket",
+                "Amphibian/Frogs",
+                "Other Animal",
+                "Aircraft",
+                "Traffic/Car",
+                "Construction",
+                "Human Voices",
+                "Other Anthropogenic",
             ]
-            user_notes = st.multiselect(
-                "Select any additional background sounds heard in this clip:",
-                options=noise_classes,
-                default=[],
-                placeholder="Start typing to search...",
-                key=f"user_notes_{fk}",
-            )
+            user_notes = []
+            mid = (len(noise_classes) + 1) // 2
+            nc1, nc2 = st.columns(2)
+            with nc1:
+                for noise in noise_classes[:mid]:
+                    if st.checkbox(noise, key=f"noise_{noise}_{fk}"):
+                        user_notes.append(noise)
+            with nc2:
+                for noise in noise_classes[mid:]:
+                    if st.checkbox(noise, key=f"noise_{noise}_{fk}"):
+                        user_notes.append(noise)
 
             st.markdown("---")
 
@@ -276,11 +289,20 @@ def render_pro_validation_form(result, selections):
                 key=f"user_comments_{fk}",
             )
 
+            submitted = st.form_submit_button(
+                "✅ Submit Validation",
+                type="primary",
+                use_container_width=True,
+                shortcut="Ctrl+Enter",
+            )
+
             if submitted:
                 _handle_pro_validation_submission(
                     result,
                     selections,
-                    selected_species,
+                    species_only_selected,
+                    none_of_above,
+                    unidentified_bird,
                     other_species_list,
                     user_notes,
                     user_confidence,
@@ -302,7 +324,9 @@ def render_pro_validation_form(result, selections):
 def _handle_pro_validation_submission(
     result,
     selections,
-    selected_species,
+    species_only_selected,
+    none_of_above,
+    unidentified_bird,
     other_species_list,
     user_notes,
     user_confidence,
@@ -315,6 +339,37 @@ def _handle_pro_validation_submission(
     if not user_confidence:
         st.error("Please rate your confidence before submitting.")
         return
+
+    # --- Primary identification consistency check (prevent ambiguous /
+    # incomplete submissions) ---
+    # Exactly one of: a specific species marked present, "None of the
+    # above", or "Unidentified bird present" must be chosen.
+    has_species = bool(species_only_selected)
+    has_none = bool(none_of_above)
+    has_unidentified = bool(unidentified_bird)
+    chosen_count = sum([has_species, has_none, has_unidentified])
+
+    if chosen_count == 0:
+        st.error(
+            "Please mark at least one species, 'None of the above', or "
+            "'Unidentified bird present' before submitting."
+        )
+        return
+
+    if chosen_count > 1:
+        st.error(
+            "Please choose only one: specific species present, 'None of "
+            "the above', or 'Unidentified bird present' — these are "
+            "mutually exclusive."
+        )
+        return
+
+    if has_none:
+        selected_species = ["NONE_DETECTED"]
+    elif has_unidentified:
+        selected_species = ["UNIDENTIFIED_BIRD_PRESENT"]
+    else:
+        selected_species = species_only_selected
 
     # --- FP characterization consistency checks (prevent silent data loss) ---
     # The FP block's fields are only saved if the "Likely FP source/confuser"

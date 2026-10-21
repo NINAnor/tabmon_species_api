@@ -59,6 +59,7 @@ def render_pro_help_section():
 - **Ctrl+1** — Toggle the top (highest-confidence) species
 - **Ctrl+2** — Toggle the second species
 - **Ctrl+3** — Toggle "None of the above"
+- **Ctrl+4** — Toggle "Unidentified bird present"
 - **Ctrl+Enter** — Submit the validation
 - **Ctrl+Right** — Load next clip (skip)
 """)

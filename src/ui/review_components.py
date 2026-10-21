@@ -160,11 +160,19 @@ def _render_original_validation(record, selections):
 
             if "NONE_DETECTED" in identified_set:
                 st.markdown("❌ **None of the above confirmed**")
+            if "UNIDENTIFIED_BIRD_PRESENT" in identified_set:
+                st.markdown(
+                    "🤷 **A bird was present but species could not be determined**"
+                )
         else:
             st.markdown("*No BirdNET detections*")
 
         # Additional species identified (not in BirdNET list)
-        extra_species = identified_set - set(species_list) - {"NONE_DETECTED", "nan"}
+        extra_species = identified_set - set(species_list) - {
+            "NONE_DETECTED",
+            "UNIDENTIFIED_BIRD_PRESENT",
+            "nan",
+        }
         if extra_species:
             st.markdown("---")
             st.markdown("**➕ Additional species identified:**")

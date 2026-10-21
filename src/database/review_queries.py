@@ -207,7 +207,8 @@ def get_filtered_validations(dataset_path, filters):
             identified = {
                 s.strip()
                 for s in str(row.get("identified_species", "")).split("|")
-                if s.strip() and s.strip() != "NONE_DETECTED"
+                if s.strip()
+                and s.strip() not in ("NONE_DETECTED", "UNIDENTIFIED_BIRD_PRESENT")
             }
             if species_filter:
                 # Scope TP/FP to the selected species only:
