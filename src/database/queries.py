@@ -5,7 +5,6 @@ import streamlit as st
 
 from config import (
     EXPERT_DATASETS_FOLDER,
-    EXPERT_TOP_SPECIES_COUNT,
     S3_ACCESS_KEY_ID,
     S3_BUCKET,
     S3_ENDPOINT,
@@ -118,19 +117,6 @@ def check_user_has_annotations(user_id, dataset_path=None):
         return result[0] > 0 if result else False
     except Exception:
         return False
-
-
-@st.cache_data
-def get_top_species_for_database(dataset_path):
-    """Get top N species by detection count for checklist."""
-    conn = get_duckdb_connection()
-    query = (
-        f'SELECT "scientific name", COUNT(*) as count '
-        f"FROM '{dataset_path}' "
-        f'GROUP BY "scientific name" ORDER BY count DESC '
-        f"LIMIT {EXPERT_TOP_SPECIES_COUNT}"
-    )
-    return [row[0] for row in conn.execute(query).fetchall()]
 
 
 @st.cache_data(ttl=300)
