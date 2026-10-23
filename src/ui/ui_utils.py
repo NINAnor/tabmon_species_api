@@ -187,10 +187,3 @@ def render_clip_metadata(result):
             st.markdown(f"**🏘️ Cluster:** `{cluster}`")
     if detection_str:
         st.markdown(f"**🔊 Detection time:** `{detection_str}`")
-
-
-def clear_cache_functions(*functions):
-    """Clear cache for multiple functions."""
-    for func in functions:
-        if hasattr(func, "clear"):
-            func.clear()

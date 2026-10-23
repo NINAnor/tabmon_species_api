@@ -27,6 +27,128 @@ def _get_all_species_list(language_code="Scientific_Name"):
     return sorted(species_list)
 
 
+def _scientific_to_display_option(scientific_name, language_code, all_species):
+    """Find the exact option string (matching a selectbox/multiselect's
+    `options=all_species`) for a given pure scientific name.
+
+    Needed because saved records always store pure scientific names, but
+    widget options may be "Common Name (Scientific Name)" when a non-English
+    display language is active. Returns None if no match is found, so the
+    caller can safely fall back to a blank default instead of crashing.
+    """
+    if not scientific_name:
+        return None
+    if language_code == "Scientific_Name":
+        return scientific_name if scientific_name in all_species else None
+
+    # get_species_display_names returns the bare common name as the dict
+    # key (e.g. "Rufous-faced Warbler"), but _get_all_species_list's
+    # options are in the combined "Common Name (Scientific Name)" format
+    # (falling back to the bare scientific name when no translation
+    # exists). Reconstruct the same combined format here so it actually
+    # matches an entry in `all_species`.
+    display_map = get_species_display_names([scientific_name], language_code)
+    common_name = next(iter(display_map.keys()), None)
+    if common_name is None:
+        return None
+    candidate = (
+        scientific_name
+        if common_name == scientific_name
+        else f"{common_name} ({scientific_name})"
+    )
+    return candidate if candidate in all_species else None
+
+
+def _parse_validation_record_for_prefill(record, language_code, all_species):
+    """Convert a saved validation CSV row back into the same shape used to
+    pre-fill the form's widgets (species, vocalization, FP block, etc.).
+
+    Mirrors the parsing already done for Review Mode's cross-validation form,
+    but produces the exact dict shape `render_pro_validation_form` expects.
+    """
+
+    def _clean(value):
+        value = "" if value is None else str(value)
+        return "" if value.lower() == "nan" else value
+
+    identified_str = _clean(record.get("identified_species"))
+    identified_list = [s.strip() for s in identified_str.split("|") if s.strip()]
+
+    detected_str = _clean(record.get("birdnet_species_detected"))
+    detected_list = [s.strip() for s in detected_str.split("|") if s.strip()]
+
+    none_of_above = "NONE_DETECTED" in identified_list
+    unidentified_bird = "UNIDENTIFIED_BIRD_PRESENT" in identified_list
+    species_only_selected = [s for s in identified_list if s in detected_list]
+    other_species_raw = [
+        s
+        for s in identified_list
+        if s not in detected_list
+        and s not in ("NONE_DETECTED", "UNIDENTIFIED_BIRD_PRESENT")
+    ]
+    other_species_list = [
+        _scientific_to_display_option(sci, language_code, all_species) or sci
+        for sci in other_species_raw
+    ]
+
+    vocalization_types = {}
+    voc_str = _clean(record.get("vocalization_types"))
+    if voc_str:
+        for pair in voc_str.split("|"):
+            if ":" in pair:
+                sp, vtype = pair.split(":", 1)
+                vocalization_types[sp.strip()] = vtype.strip()
+
+    user_notes_str = _clean(record.get("user_notes"))
+    user_notes = [s.strip() for s in user_notes_str.split("|") if s.strip()]
+
+    # Reconstruct the original "Likely FP source/confuser" dropdown label
+    # from the saved fp_source_category / fp_source_detail columns.
+    fp_category = _clean(record.get("fp_source_category"))
+    fp_detail = _clean(record.get("fp_source_detail"))
+    fp_species_raw = ""
+    fp_other_bird_text = ""
+    if fp_category == "Bird":
+        fp_source = "Specific bird species (choose below)"
+        fp_species_raw = fp_detail
+    elif fp_category == "Other bird":
+        fp_source = "Other bird (unidentified — describe below)"
+        fp_other_bird_text = fp_detail
+    elif fp_category == "Unclear":
+        fp_source = "Unclear"
+    elif fp_category and fp_detail:
+        fp_source = f"{fp_category} — {fp_detail}"
+    else:
+        fp_source = ""
+
+    fp_species = _scientific_to_display_option(
+        fp_species_raw, language_code, all_species
+    )
+
+    fp_mechanism_str = _clean(record.get("fp_likely_mechanism"))
+    fp_mechanism = [s.strip() for s in fp_mechanism_str.split("|") if s.strip()]
+
+    return {
+        "species_only_selected": species_only_selected,
+        "vocalization_types": vocalization_types,
+        "none_of_above": none_of_above,
+        "unidentified_bird": unidentified_bird,
+        "other_species_list": other_species_list,
+        "user_confidence": _clean(record.get("user_confidence")) or None,
+        "user_notes": user_notes,
+        "user_comments": _clean(record.get("user_comments")),
+        "fp_form_data": {
+            "fp_source": fp_source,
+            "fp_species": fp_species,
+            "fp_other_bird_text": fp_other_bird_text,
+            "fp_vocalization": _clean(record.get("fp_confuser_vocalization")),
+            "fp_mechanism": fp_mechanism,
+            "fp_certainty": _clean(record.get("fp_certainty")) or None,
+            "fp_comment": _clean(record.get("fp_comment")),
+        },
+    }
+
+
 def render_pro_validation_form(result, selections):
     """
     Render the Expert mode validation form with species checklist.
@@ -38,25 +160,40 @@ def render_pro_validation_form(result, selections):
     with st.container(border=True):
         st.markdown("### 🎯 Expert Validation")
 
-        # Show remaining clips count from session state
-        if (
-            "expert_remaining_count" in st.session_state
-            and st.session_state.expert_remaining_count is not None
-        ):
-            remaining = st.session_state.expert_remaining_count
-            st.success("🎉 All clips validated!") if remaining == 0 else st.info(
-                f"📊 Still **{remaining}** clips to annotate"
+        from database.queries import (
+            get_remaining_pro_clips_count,
+            get_user_validation_records,
+        )
+
+        clips = st.session_state.get("expert_full_clip_list") or []
+        index = st.session_state.get("expert_clip_index", 0)
+        validation_records = get_user_validation_records(
+            selections["user_id"], selections["dataset_path"]
+        )
+        validated_keys = set(validation_records.keys())
+
+        if clips:
+            remaining = get_remaining_pro_clips_count(clips, validated_keys)
+            st.info(
+                f"📍 Clip **{index + 1}** of **{len(clips)}** · "
+                f"**{remaining}** still unannotated"
             )
 
         fk = st.session_state.get("expert_form_key", 0)
 
-        # If the annotator clicked "Fix My Last Submission", pre-fill every
-        # widget below with whatever was submitted last time, so they only
-        # need to change the one thing they got wrong.
-        is_fixing = st.session_state.get("expert_is_fixing", False)
+        # If this clip already has a submitted record (whether you arrived
+        # here via Previous, Next, or a fresh load), pre-fill every widget
+        # below with what was submitted, so you only need to change the one
+        # thing you got wrong. Resubmitting appends a new is_update=True row.
+        record_key = (result.get("filename"), result.get("start_time"))
+        existing_record = validation_records.get(record_key)
+        language_code = selections.get("language_code", "Scientific_Name")
+        all_species_for_prefill = _get_all_species_list(language_code)
         last_fields = (
-            (st.session_state.get("expert_last_submission_fields") or {})
-            if is_fixing
+            _parse_validation_record_for_prefill(
+                existing_record, language_code, all_species_for_prefill
+            )
+            if existing_record is not None
             else {}
         )
         last_fp = last_fields.get("fp_form_data") or {}
@@ -86,7 +223,6 @@ def render_pro_validation_form(result, selections):
             )
 
             # Get translations
-            language_code = selections.get("language_code", "Scientific_Name")
             scientific_names = [species for species, _ in species_data]
             display_name_map = get_species_display_names(
                 scientific_names, language_code
@@ -98,7 +234,7 @@ def render_pro_validation_form(result, selections):
             # Get all available species for autocomplete (used both for the
             # "Other species not listed above" picker and the clip-level FP
             # confuser search below)
-            all_species = _get_all_species_list(language_code)
+            all_species = all_species_for_prefill
 
             # Display checklist. Picking a vocalization type alone (without
             # also checking the box) is enough to mark a species present —
@@ -155,10 +291,10 @@ def render_pro_validation_form(result, selections):
             )
 
             # Keyboard shortcuts: Ctrl+1 / Ctrl+2 toggle the top two species
-            # checkboxes, Ctrl+3 toggles "None of the above", Ctrl+4 toggles
-            # "Unidentified bird present". Guarded so we never reference a
-            # checkbox key that doesn't exist for clips with fewer than 2
-            # BirdNET detections.
+            # checkboxes, Ctrl+3 toggles "No bird species audible", Ctrl+4
+            # toggles "Unidentified bird present". Guarded so we never
+            # reference a checkbox key that doesn't exist for clips with
+            # fewer than 2 BirdNET detections.
             shortcut_bindings = {}
             if len(species_data) >= 1:
                 shortcut_bindings[f"species_0_{fk}"] = "ctrl+1"
@@ -170,8 +306,8 @@ def render_pro_validation_form(result, selections):
 
             # Clip-level False Positive characterization — applies whenever
             # one or more BirdNET-detected species were rejected (left
-            # unchecked, or covered by "None of the above"). One block per
-            # clip rather than per species, since the FP source/confuser
+            # unchecked, or covered by "No bird species audible"). One block
+            # per clip rather than per species, since the FP source/confuser
             # typically describes the whole clip, not an individual row.
             with st.expander("🔬 Characterize as False Positive (optional)"):
                 fp_source_options = [
@@ -390,6 +526,7 @@ def render_pro_validation_form(result, selections):
                         "fp_certainty": fp_certainty,
                         "fp_comment": fp_comment,
                     },
+                    existing_record is not None,
                 )
 
 
@@ -406,19 +543,17 @@ def _handle_pro_validation_submission(
     vocalization_types,
     species_data=None,
     fp_form_data=None,
+    has_existing_record=False,
 ):
     """Handle Expert mode validation form submission."""
     if not user_confidence:
         st.error("Please rate your confidence before submitting.")
         return
 
-    # Was this submission a correction via "Fix My Last Submission"?
-    is_fixing = st.session_state.get("expert_is_fixing", False)
-
     # --- Primary identification consistency check (prevent ambiguous /
     # incomplete submissions) ---
-    # Exactly one of: a specific species marked present, "None of the
-    # above", or "Unidentified bird present" must be chosen.
+    # Exactly one of: a specific species marked present, "No bird species
+    # audible", or "Unidentified bird present" must be chosen.
     has_species = bool(species_only_selected)
     has_none = bool(none_of_above)
     has_unidentified = bool(unidentified_bird)
@@ -535,15 +670,15 @@ def _handle_pro_validation_submission(
         "user_notes": user_notes,
         "user_comments": user_comments,
         "timestamp": pd.Timestamp.now(),
-        "is_update": is_fixing,
+        "is_update": has_existing_record,
         "is_cross_validation": False,
     }
 
     # Clip-level False Positive characterization. Applies to all
     # BirdNET-detected species that were rejected in this clip (left
-    # unchecked, or covered by "None of the above"). Left blank when the
-    # FP block wasn't filled in, so TP-only submissions simply have empty
-    # fp_* columns in the same output file.
+    # unchecked, or covered by "No bird species audible"). Left blank when
+    # the FP block wasn't filled in, so TP-only submissions simply have
+    # empty fp_* columns in the same output file.
     fp_category, fp_detail = "", ""
     if is_fp_characterized:
         if fp_source.startswith("Specific bird species"):
@@ -608,31 +743,18 @@ def _handle_pro_validation_submission(
 
     save_pro_validation_response(validation_data)
 
-    # Remember this submission so "Fix My Last Submission" can reload and
-    # pre-fill it later. Overwrites whatever was remembered before, so only
-    # the single most recent submission can be fixed at a time.
-    st.session_state.expert_last_submitted_clip = result
-    st.session_state.expert_last_submission_fields = {
-        "species_only_selected": species_only_selected,
-        "vocalization_types": vocalization_types,
-        "none_of_above": none_of_above,
-        "unidentified_bird": unidentified_bird,
-        "other_species_list": other_species_list,
-        "user_confidence": user_confidence,
-        "user_notes": user_notes,
-        "user_comments": user_comments,
-        "fp_form_data": fp_form_data,
-    }
-    st.session_state.expert_is_fixing = False
-
-    # Clear current clip to force loading a new one
-    st.session_state.expert_current_clip = None
+    # Advance to the next clip in the list (clamped to the last index).
+    clips = st.session_state.get("expert_full_clip_list") or []
+    if clips:
+        st.session_state.expert_clip_index = min(
+            st.session_state.get("expert_clip_index", 0) + 1, len(clips) - 1
+        )
 
     # Increment form key to reset all form fields
     st.session_state.expert_form_key = st.session_state.get("expert_form_key", 0) + 1
 
-    if is_fixing:
-        st.toast("✅ Correction saved! Loading next clip...")
+    if has_existing_record:
+        st.toast("✅ Correction saved!")
     else:
         st.toast("✅ Annotation saved! Loading next clip...")
     st.rerun()

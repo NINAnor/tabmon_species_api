@@ -2,7 +2,6 @@
 
 import streamlit as st
 
-from database.queries import get_random_assigned_clip
 from session.session_utils import (
     check_params_changed,
     init_base_session,
@@ -16,17 +15,12 @@ def initialize_pro_session():
     init_state_vars(
         "expert_",
         {
-            "current_clip": None,
             "clip_params": None,
             "authenticated": False,
             "user_id": None,
             "selected_dataset": None,
-            "validated_clips_session": set(),
-            "skipped_clips_session": set(),
-            "remaining_count": None,
-            "last_submitted_clip": None,
-            "last_submission_fields": None,
-            "is_fixing": False,
+            "full_clip_list": None,
+            "clip_index": 0,
         },
     )
     initialize_review_session()
@@ -48,24 +42,29 @@ def initialize_review_session():
 
 def clear_pro_clip_state():
     """Clear all Expert mode clip-related state and caches."""
-    st.session_state.expert_current_clip = None
+    st.session_state.expert_full_clip_list = None
+    st.session_state.expert_clip_index = 0
     st.session_state.expert_clip_params = None
-    st.session_state.expert_validated_clips_session = set()
-    st.session_state.expert_skipped_clips_session = set()
-    st.session_state.expert_remaining_count = None
-    st.session_state.expert_clip_queue = []
-    st.session_state.expert_last_submitted_clip = None
-    st.session_state.expert_last_submission_fields = None
-    st.session_state.expert_is_fixing = False
 
-    from database.queries import get_remaining_pro_clips_count, get_validated_pro_clips
+    from database.queries import (
+        get_assigned_clips_for_user,
+        get_user_validation_records,
+    )
 
-    get_validated_pro_clips.clear()
-    get_remaining_pro_clips_count.clear()
+    get_assigned_clips_for_user.clear()
+    get_user_validation_records.clear()
 
 
 def get_or_load_pro_clip(selections):
-    """Get current Expert clip or load a new one if needed."""
+    """Get the clip at the current position in the user's full assigned list.
+
+    Clips are served via true, stable position-based navigation rather than
+    a prefetch queue: the full ordered list of assigned clips (optionally
+    species-filtered) is loaded once and cached, and `expert_clip_index`
+    tracks where the user currently is. "Previous"/"Next" simply move that
+    index — landing on an already-submitted clip re-shows it (pre-filled,
+    editable); landing on a fresh one shows a blank form.
+    """
     initialize_pro_session()
 
     # Include dataset_path, user_id, species_filter and language_code in params
@@ -83,22 +82,32 @@ def get_or_load_pro_clip(selections):
         clear_pro_clip_state()
         st.session_state.expert_clip_params = current_params
 
-    # If current clip is None, get new clip
-    if st.session_state.expert_current_clip is None:
-        # Initialize remaining count on first load
-        if st.session_state.expert_remaining_count is None:
-            from database.queries import get_remaining_pro_clips_count
-
-            st.session_state.expert_remaining_count = get_remaining_pro_clips_count(
-                selections["user_id"],
-                selections["dataset_path"],
-                species_filter,
-            )
-
-        st.session_state.expert_current_clip = get_random_assigned_clip(
-            selections["user_id"],
-            selections["dataset_path"],
-            species_filter,
+    # Load the full clip list once per params combination
+    if st.session_state.expert_full_clip_list is None:
+        from database.queries import (
+            filter_clips_by_species,
+            get_assigned_clips_for_user,
+            get_first_unannotated_index,
+            get_user_validation_records,
         )
 
-    return st.session_state.expert_current_clip
+        all_clips = get_assigned_clips_for_user(
+            selections["user_id"], selections["dataset_path"]
+        )
+        filtered_clips = filter_clips_by_species(all_clips, species_filter)
+        st.session_state.expert_full_clip_list = filtered_clips
+
+        validation_records = get_user_validation_records(
+            selections["user_id"], selections["dataset_path"]
+        )
+        st.session_state.expert_clip_index = get_first_unannotated_index(
+            filtered_clips, set(validation_records.keys())
+        )
+
+    clips = st.session_state.expert_full_clip_list
+    index = st.session_state.expert_clip_index
+
+    if not clips or index >= len(clips):
+        return {"all_validated": True, "total_clips": len(clips)}
+
+    return clips[index]
