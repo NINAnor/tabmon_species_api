@@ -159,7 +159,7 @@ def _render_original_validation(record, selections):
                 st.markdown(f"{icon} {display_name} (conf: {conf_val:.2f})")
 
             if "NONE_DETECTED" in identified_set:
-                st.markdown("❌ **None of the above confirmed**")
+                st.markdown("❌ **No bird species audible**")
             if "UNIDENTIFIED_BIRD_PRESENT" in identified_set:
                 st.markdown(
                     "🤷 **A bird was present but species could not be determined**"

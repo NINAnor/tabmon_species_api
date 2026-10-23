@@ -5,7 +5,6 @@ import streamlit as st
 
 from config import (
     EXPERT_DATASETS_FOLDER,
-    EXPERT_TOP_SPECIES_COUNT,
     S3_ACCESS_KEY_ID,
     S3_BUCKET,
     S3_ENDPOINT,
@@ -120,19 +119,6 @@ def check_user_has_annotations(user_id, dataset_path=None):
         return False
 
 
-@st.cache_data
-def get_top_species_for_database(dataset_path):
-    """Get top N species by detection count for checklist."""
-    conn = get_duckdb_connection()
-    query = (
-        f'SELECT "scientific name", COUNT(*) as count '
-        f"FROM '{dataset_path}' "
-        f'GROUP BY "scientific name" ORDER BY count DESC '
-        f"LIMIT {EXPERT_TOP_SPECIES_COUNT}"
-    )
-    return [row[0] for row in conn.execute(query).fetchall()]
-
-
 @st.cache_data(ttl=300)
 def get_species_for_user(user_id, dataset_path):
     """Get unique species available for a user in the dataset.
@@ -199,10 +185,29 @@ def get_assigned_clips_for_user(user_id, dataset_path):
     return clips
 
 
+def filter_clips_by_species(clips, species_filter):
+    """Filter a list of clip dicts to those matching any of species_filter.
+
+    Pure Python, operates on the already-loaded full clip list (from
+    get_assigned_clips_for_user) rather than re-querying S3.
+    """
+    if not species_filter:
+        return clips
+    species_set = set(species_filter)
+    return [
+        clip
+        for clip in clips
+        if set(clip.get("species_array") or []) & species_set
+    ]
+
+
 @st.cache_data(ttl=300)
-def get_validated_pro_clips(user_id, dataset_path):
-    """Get clips already validated by this user for the given dataset.
-    Returns set of (filename, start_time) tuples.
+def get_user_validation_records(user_id, dataset_path):
+    """Load this user's own submitted validation rows for the dataset.
+
+    Returns dict {(filename, start_time): row_dict} keeping only the most
+    recent row (by timestamp) per clip, so prior corrections (is_update=True
+    rows) are reflected rather than the original mistaken submission.
     """
     import tempfile
     from pathlib import Path
@@ -219,7 +224,6 @@ def get_validated_pro_clips(user_id, dataset_path):
         S3_SECRET_ACCESS_KEY,
     )
 
-    # Extract dataset name for filtering
     dataset_name = (
         dataset_path.split("/")[-1].replace(".parquet", "") if dataset_path else ""
     )
@@ -237,11 +241,10 @@ def get_validated_pro_clips(user_id, dataset_path):
             Bucket=S3_BUCKET, Prefix=EXPERT_VALIDATIONS_PREFIX
         )
         if "Contents" not in response:
-            return set()
+            return {}
 
         all_validations = []
         for obj in response["Contents"]:
-            # Only load files for this dataset
             filename = obj["Key"].split("/")[-1]
             if obj["Key"].endswith(".csv") and filename.startswith(f"{dataset_name}_"):
                 try:
@@ -257,203 +260,52 @@ def get_validated_pro_clips(user_id, dataset_path):
                         finally:
                             Path(temp_file.name).unlink()
                 except Exception as e:
-                    # Skip invalid CSV files during validation loading
                     st.warning(f"Skipping invalid file {obj['Key']}: {e}")
                     continue
 
         if not all_validations:
-            return set()
+            return {}
 
         combined_df = pd.concat(all_validations, ignore_index=True)
         filtered = combined_df[combined_df["userID"].astype(str) == str(user_id)]
-        return set(zip(filtered["filename"], filtered["start_time"], strict=False))
+        if filtered.empty:
+            return {}
+
+        # Keep only the latest row (by timestamp) per (filename, start_time)
+        filtered = filtered.copy()
+        filtered["timestamp"] = pd.to_datetime(
+            filtered["timestamp"], errors="coerce"
+        )
+        filtered = filtered.sort_values("timestamp")
+
+        records = {}
+        for _, row in filtered.iterrows():
+            key = (row["filename"], row["start_time"])
+            records[key] = row.to_dict()
+
+        return records
 
     except Exception:
-        return set()
+        return {}
 
 
-def _get_validated_clips_with_session(user_id, dataset_path):
-    """Get all validated and skipped clips including session state."""
-    validated_clips = get_validated_pro_clips(user_id, dataset_path)
-    if hasattr(st.session_state, "expert_validated_clips_session"):
-        validated_clips = validated_clips.union(
-            st.session_state.expert_validated_clips_session
-        )
-    # Also include skipped clips (from "Load Next Clip" button)
-    if hasattr(st.session_state, "expert_skipped_clips_session"):
-        validated_clips = validated_clips.union(
-            st.session_state.expert_skipped_clips_session
-        )
-    return validated_clips
+def get_remaining_pro_clips_count(clips, validated_keys):
+    """Count how many clips in the (already-filtered) list are unvalidated.
 
-
-CLIP_PREFETCH_BATCH_SIZE = 10
-
-
-def _build_exclusion_clause(validated_clips):
-    """Build SQL exclusion clause for validated/skipped clips."""
-    if validated_clips:
-        validated_tuples = [
-            (filename, start_time) for filename, start_time in validated_clips
-        ]
-        placeholders = ",".join(["(?, ?)" for _ in validated_tuples])
-        exclusion_clause = f'AND (fullPath, "start time") NOT IN ({placeholders})'
-        exclusion_params = [
-            item
-            for filename, start_time in validated_tuples
-            for item in [filename, start_time]
-        ]
-    else:
-        exclusion_clause = ""
-        exclusion_params = []
-    return exclusion_clause, exclusion_params
-
-
-def _build_species_clause(species_filter):
-    """Build SQL species filter clause."""
-    if species_filter:
-        species_placeholders = ",".join(["?" for _ in species_filter])
-        species_clause = (
-            f'AND len(list_filter("scientific name", '
-            f"x -> x IN ({species_placeholders}))) > 0"
-        )
-        species_params = list(species_filter)
-    else:
-        species_clause = ""
-        species_params = []
-    return species_clause, species_params
-
-
-def _parse_clip_row(row):
-    """Parse a query result row into a clip dict."""
-    return {
-        "filename": row[0],
-        "deployment_id": row[1],
-        "start_time": row[2],
-        "species_array": row[3],
-        "confidence_array": row[4],
-        "userID": row[5],
-        "all_validated": False,
-    }
-
-
-def prefetch_clip_batch(user_id, dataset_path, species_filter=None):
-    """Prefetch a batch of unvalidated clips for the user.
-
-    Fetches CLIP_PREFETCH_BATCH_SIZE clips in a single S3 parquet query
-    and stores them in session state as a queue.
+    Pure Python — operates on the full clip list and the set of validated
+    keys already loaded in memory, no extra query needed.
     """
-    conn = get_duckdb_connection()
-    validated_clips = _get_validated_clips_with_session(user_id, dataset_path)
-    exclusion_clause, exclusion_params = _build_exclusion_clause(validated_clips)
-    species_clause, species_params = _build_species_clause(species_filter)
-
-    query = f"""
-    SELECT fullPath, deployment_id, "start time", "scientific name",
-           confidence, userID
-    FROM '{dataset_path}'
-    WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR)
-    AND fullPath IS NOT NULL AND fullPath != ''
-    {exclusion_clause}
-    {species_clause}
-    ORDER BY fullPath, "start time"
-    LIMIT {CLIP_PREFETCH_BATCH_SIZE}
-    """
-
-    try:
-        results = conn.execute(
-            query, [user_id] + exclusion_params + species_params
-        ).fetchall()
-
-        if results:
-            return [_parse_clip_row(row) for row in results]
-
-        # No results — check if all validated
-        count_query = (
-            f"SELECT COUNT(*) FROM '{dataset_path}' "
-            f"WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR) "
-            f"AND fullPath IS NOT NULL AND fullPath != '' "
-            f"{species_clause}"
-        )
-        total = conn.execute(count_query, [user_id] + species_params).fetchone()[0]
-
-        if total > 0:
-            return [{"all_validated": True, "total_clips": total}]
-        return []
-    except Exception as e:
-        st.error(f"Error prefetching clips: {e}")
-        return []
-
-
-def get_random_assigned_clip(user_id, dataset_path, species_filter=None):
-    """Get next unvalidated clip for user from the selected dataset.
-
-    Uses a prefetched queue of clips to avoid repeated S3 queries.
-    Falls back to a fresh batch fetch when the queue is empty.
-
-    Args:
-        user_id: User ID to filter by
-        dataset_path: S3 path to the parquet dataset
-        species_filter: Optional list of species to filter by
-
-    Returns dict with clip info, or 'all_validated': True if done.
-    """
-    # Initialize clip queue if not present
-    if "expert_clip_queue" not in st.session_state:
-        st.session_state.expert_clip_queue = []
-
-    # Get validated/skipped clips for filtering the queue
-    validated_clips = _get_validated_clips_with_session(user_id, dataset_path)
-
-    # Filter out any clips in the queue that have since been validated/skipped
-    st.session_state.expert_clip_queue = [
-        clip
-        for clip in st.session_state.expert_clip_queue
-        if clip.get("all_validated")
-        or (clip["filename"], clip["start_time"]) not in validated_clips
-    ]
-
-    # Refill queue if empty
-    if not st.session_state.expert_clip_queue:
-        st.session_state.expert_clip_queue = prefetch_clip_batch(
-            user_id, dataset_path, species_filter
-        )
-
-    # Pop the first clip from the queue
-    if st.session_state.expert_clip_queue:
-        return st.session_state.expert_clip_queue.pop(0)
-
-    return None
-
-
-@st.cache_data
-def get_remaining_pro_clips_count(user_id, dataset_path, species_filter=None):
-    """Get count of remaining unvalidated clips for user in the selected dataset.
-
-    Args:
-        user_id: User ID to filter by
-        dataset_path: S3 path to the parquet dataset
-        species_filter: Optional list of species to filter by
-
-    Uses DuckDB COUNT for performance.
-    """
-    conn = get_duckdb_connection()
-    validated_clips = _get_validated_clips_with_session(user_id, dataset_path)
-    exclusion_clause, exclusion_params = _build_exclusion_clause(validated_clips)
-    species_clause, species_params = _build_species_clause(species_filter)
-
-    query = (
-        f"SELECT COUNT(*) FROM '{dataset_path}' "
-        f"WHERE CAST(userID AS VARCHAR) = CAST(? AS VARCHAR) "
-        f"AND fullPath IS NOT NULL AND fullPath != '' "
-        f"{exclusion_clause} "
-        f"{species_clause}"
+    return sum(
+        1
+        for clip in clips
+        if (clip["filename"], clip["start_time"]) not in validated_keys
     )
 
-    try:
-        result = conn.execute(
-            query, [user_id] + exclusion_params + species_params
-        ).fetchone()
-        return result[0] if result else 0
-    except Exception:
-        return 0
+
+def get_first_unannotated_index(clips, validated_keys):
+    """Return the index of the first not-yet-validated clip, or len(clips)
+    if every clip has already been validated."""
+    for idx, clip in enumerate(clips):
+        if (clip["filename"], clip["start_time"]) not in validated_keys:
+            return idx
+    return len(clips)

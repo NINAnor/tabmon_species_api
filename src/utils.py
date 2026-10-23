@@ -174,24 +174,11 @@ def save_pro_validation_response(validation_data):
         except Exception:
             save_to_s3(validation_df, bucket, key)
 
-        # Track in session state and update counter
-        if "expert_validated_clips_session" not in st.session_state:
-            st.session_state.expert_validated_clips_session = set()
+        # Bust the cached validation-records lookup so the just-saved row
+        # (and updated remaining-count) is picked up on the next render.
+        from database.queries import get_user_validation_records
 
-        clip_key = (validation_data["filename"], validation_data["start_time"])
-        st.session_state.expert_validated_clips_session.add(clip_key)
-
-        if (
-            "expert_remaining_count" in st.session_state
-            and st.session_state.expert_remaining_count is not None
-        ):
-            st.session_state.expert_remaining_count = max(
-                0, st.session_state.expert_remaining_count - 1
-            )
-
-        from database.queries import get_remaining_pro_clips_count
-
-        get_remaining_pro_clips_count.clear()
+        get_user_validation_records.clear()
         return True
     except Exception as e:
         st.error(f"Error saving Expert validation: {e}")

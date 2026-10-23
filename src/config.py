@@ -24,9 +24,6 @@ SITE_INFO_S3_PATH = f"{S3_BASE_URL}/site_info.csv"
 # Expert mode validations stored in: validations_expert/session_{session_id}.csv
 EXPERT_VALIDATIONS_PREFIX = "validations_expert"
 
-# Expert Mode Settings
-EXPERT_TOP_SPECIES_COUNT = int(os.getenv("EXPERT_TOP_SPECIES_COUNT", "10"))
-
 # ============================================================================
 # Language Configuration
 # ============================================================================

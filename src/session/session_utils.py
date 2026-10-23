@@ -19,14 +19,6 @@ def init_state_vars(prefix, vars_dict):
             st.session_state[full_name] = default_value
 
 
-def clear_state_vars(prefix, var_names):
-    """Clear multiple state variables."""
-    for var_name in var_names:
-        full_name = f"{prefix}{var_name}" if prefix else var_name
-        if full_name in st.session_state:
-            st.session_state[full_name] = None
-
-
 def check_params_changed(state_key, new_params):
     """Check if parameters have changed. Returns True if changed."""
     if state_key not in st.session_state:
