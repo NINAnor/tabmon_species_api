@@ -138,7 +138,7 @@ def render_pro_validation_form(result, selections):
                         vocalization_types[species] = vocal_type
 
             none_of_above = st.checkbox(
-                "❌ None of the above species are present",
+                "❌ No bird species audible",
                 value=last_fields.get("none_of_above", False),
                 key=f"none_of_above_{fk}",
                 help="Check this if you cannot hear any bird in this clip at all",
@@ -426,15 +426,15 @@ def _handle_pro_validation_submission(
 
     if chosen_count == 0:
         st.error(
-            "Please mark at least one species, 'None of the above', or "
+            "Please mark at least one species, 'No bird species audible', or "
             "'Unidentified bird present' before submitting."
         )
         return
 
     if chosen_count > 1:
         st.error(
-            "Please choose only one: specific species present, 'None of "
-            "the above', or 'Unidentified bird present' — these are "
+            "Please choose only one: specific species present, 'No bird "
+            "species audible', or 'Unidentified bird present' — these are "
             "mutually exclusive."
         )
         return
@@ -473,9 +473,9 @@ def _handle_pro_validation_submission(
         st.error(
             "🔬 You selected a 'Likely FP source/confuser' but every listed "
             "species is still confirmed. Uncheck the species this applies "
-            "to (or check 'None of the above'), or reset the FP source back "
-            "to '— Not a false positive / N/A —' if this clip isn't a false "
-            "positive."
+            "to (or check 'No bird species audible'), or reset the FP "
+            "source back to '— Not a false positive / N/A —' if this clip "
+            "isn't a false positive."
         )
         return
 

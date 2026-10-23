@@ -58,10 +58,10 @@ def render_pro_help_section():
         st.markdown("""
 - **Ctrl+1** — Toggle the top (highest-confidence) species
 - **Ctrl+2** — Toggle the second species
-- **Ctrl+3** — Toggle "None of the above"
+- **Ctrl+3** — Toggle "No bird species audible"
 - **Ctrl+4** — Toggle "Unidentified bird present"
 - **Ctrl+Enter** — Submit the validation
-- **Ctrl+Right** — Load next clip (skip)
+- **Ctrl+Right** — Next (skip without submitting)
 """)
 
 
@@ -150,7 +150,7 @@ def _prefetch_next_clip_audio():
 def render_pro_load_new_button():
     """Render the load new detection button for Expert mode."""
     if st.button(
-        "🔄 Load Next Clip",
+        "▶️ Next",
         help="Get the next assigned clip to annotate",
         shortcut="Ctrl+Right",
     ):
@@ -202,7 +202,7 @@ def render_pro_fix_last_submission_button():
         return
 
     if st.button(
-        "↩️ Fix My Last Submission",
+        "⬅️ Previous",
         help=(
             "Reopen the clip you just submitted to correct a mistake. This "
             "adds a new, corrected row — it doesn't delete your original "
