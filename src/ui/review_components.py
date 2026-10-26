@@ -12,9 +12,9 @@ from handlers.validation_handlers import (
     _extract_scientific,
     _get_all_species_list,
     _parse_validation_record_for_prefill,
-    render_confidence_fragment,
     render_fp_characterization_fragment,
 )
+from ui.ui_shortcuts import add_form_shortcuts
 from ui.ui_utils import (
     _generate_spectrogram_image,
     render_audio_player,
@@ -370,13 +370,13 @@ def _render_cross_validation_form(record, selections):
         # collected from session state at submit time.
         review_all_species = _get_all_species_list(language_code)
         last_fp = {}
+        parsed_own = {}
         if is_update_mode:
             parsed_own = _parse_validation_record_for_prefill(
                 record, language_code, review_all_species
             )
             last_fp = parsed_own.get("fp_form_data") or {}
         render_fp_characterization_fragment("xfp", fk, review_all_species, last_fp)
-        render_confidence_fragment("review", fk)
 
         with st.form(f"cross_validation_form_{fk}"):
             if is_update_mode:
@@ -440,6 +440,7 @@ def _render_cross_validation_form(record, selections):
 
             none_of_above = st.checkbox(
                 "❌ None of the listed species are present",
+                value=parsed_own.get("none_of_above", False),
                 key=f"review_none_{fk}",
                 help=(
                     "Check this if none of the BirdNET-detected species are "
@@ -452,6 +453,7 @@ def _render_cross_validation_form(record, selections):
 
             no_bird_audible = st.checkbox(
                 "🕊️ No bird species audible",
+                value=parsed_own.get("no_bird_audible", False),
                 key=f"review_no_bird_{fk}",
                 help=(
                     "Check this if no bird of any kind is audible in this "
@@ -461,6 +463,14 @@ def _render_cross_validation_form(record, selections):
 
             if no_bird_audible:
                 selected_species.append(NO_BIRD_AUDIBLE)
+
+            unidentified_bird = st.checkbox(
+                "🤷 A bird is present but I can't determine the species",
+                value=parsed_own.get("unidentified_bird", False),
+                key=f"review_unidentified_{fk}",
+            )
+            if unidentified_bird:
+                selected_species.append("UNIDENTIFIED_BIRD_PRESENT")
 
             # Additional species not detected by BirdNET
             already_shown = set(scientific_to_display.values())
@@ -473,6 +483,29 @@ def _render_cross_validation_form(record, selections):
                 placeholder="Start typing to search...",
                 help="Add species you hear that BirdNET did not detect",
             )
+
+            st.markdown("---")
+
+            user_confidence = st.radio(
+                "**Confidence:**",
+                options=["Low", "Moderate", "High"],
+                index=None,
+                horizontal=True,
+                key=f"review_confidence_{fk}",
+            )
+            shortcut_bindings = {
+                f"review_none_{fk}": "2",
+                f"review_no_bird_{fk}": "3",
+                f"review_unidentified_{fk}": "4",
+                f"review_confidence_{fk}": [
+                    {"shortcut": "q", "option": "Low"},
+                    {"shortcut": "w", "option": "Moderate"},
+                    {"shortcut": "e", "option": "High"},
+                ],
+            }
+            if species_list:
+                shortcut_bindings[f"review_species_0_{fk}"] = "1"
+            add_form_shortcuts(**shortcut_bindings)
 
             st.markdown("---")
 
@@ -501,7 +534,7 @@ def _render_cross_validation_form(record, selections):
                     selections,
                     selected_species,
                     vocalization_types,
-                    st.session_state.get(f"review_confidence_val_{fk}"),
+                    user_confidence,
                     user_comments,
                     extra_species_raw,
                     is_update=is_update_mode,
@@ -559,6 +592,34 @@ def _handle_cross_validation_submission(
         st.error(
             "Please rate your confidence in the annotation above, or the "
             "certainty of the False-Positive assessment."
+        )
+        return
+
+    sentinels = {
+        "NONE_DETECTED",
+        NO_BIRD_AUDIBLE,
+        "UNIDENTIFIED_BIRD_PRESENT",
+    }
+    has_confirmed_species = any(
+        species not in sentinels for species in selected_species
+    )
+    has_none = "NONE_DETECTED" in selected_species
+    has_silence = NO_BIRD_AUDIBLE in selected_species
+    has_unidentified = "UNIDENTIFIED_BIRD_PRESENT" in selected_species
+    has_other_species = bool(extra_species_raw)
+
+    if has_none and has_confirmed_species:
+        st.error(
+            "Contradictory annotation: you confirmed species and selected "
+            "'None of the listed species are present'."
+        )
+        return
+    if has_silence and any(
+        [has_confirmed_species, has_unidentified, has_other_species]
+    ):
+        st.error(
+            "Contradictory annotation: 'No bird species audible' conflicts "
+            "with the species marked above."
         )
         return
 

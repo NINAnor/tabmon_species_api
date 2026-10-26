@@ -1,12 +1,4 @@
-"""Keyboard shortcut helper with input-field safety.
-
-A guarded port of `streamlit_shortcuts.add_shortcuts` that also ignores
-key events originating inside text fields. That is required when plain
-keys like "1" or "q" are bound: the original library calls
-`preventDefault()` on every match, which would silently swallow typed
-characters. Native `st.button(shortcut=...)` is unaffected; Streamlit's
-own implementation already filters those elements via hotkeys-js.
-"""
+"""Keyboard shortcuts for Streamlit form widgets."""
 
 import json
 
@@ -14,46 +6,57 @@ import streamlit.components.v1 as components
 
 
 def add_form_shortcuts(**shortcuts):
-    """Bind keyboard shortcuts to widgets by key, safe while typing.
+    """Bind keyboard shortcuts to checkbox and radio widgets.
 
     The listener is registered once per browser session and its mapping
-    is updated on every rerun, so bindings may change as widgets change.
+    is replaced on every rerun, so removed widget keys cannot shadow the
+    current form's shortcuts.
 
     Args:
-        **shortcuts: widget key -> hotkey string or list of hotkeys.
-            e.g. species_0_4="1", none_of_above_4="2".
-            Keys follow streamlit-shortcuts syntax: plain letters/numbers
-            or modifier combos like "ctrl+1".
+        **shortcuts: widget key -> hotkey, list of hotkeys, or radio option
+            descriptors. For example, species_0_4="1" and confidence_4=[
+            {"shortcut": "q", "option": "Low"}, ...].
     """
-    assert shortcuts, "No shortcuts provided"
-
-    normalized = {
-        key: value if isinstance(value, list) else [value]
-        for key, value in shortcuts.items()
-    }
+    if not shortcuts:
+        raise ValueError("At least one shortcut binding is required")
 
     js = (
         """<script>
     const doc = window.parent.document;
     const parentWindow = window.parent.window;
     const shortcuts = """
-        + json.dumps(normalized)
+        + json.dumps(shortcuts)
         + """;
 
     if (!doc) throw new Error('Not running in Streamlit context');
 
+    const shortcutsVersion = 2;
+    if (parentWindow.__formShortcutsInitialized &&
+        parentWindow.__formShortcutsVersion !== shortcutsVersion) {
+        doc.removeEventListener(
+            'keydown', parentWindow.__formShortcutsListener
+        );
+        parentWindow.__formShortcutsInitialized = false;
+    }
+
     if (!parentWindow.__formShortcutsInitialized) {
         parentWindow.__formShortcutsMap = {};
         parentWindow.__formShortcutsListener = function(e) {
-            const target = e.target || {};
-            const tag = target.tagName || '';
-            if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' ||
-                target.isContentEditable) {
+            if (e.target && e.target.closest && e.target.closest(
+                'input:not([type="checkbox"]):not([type="radio"]), ' +
+                'select, textarea, [contenteditable="true"]'
+            )) {
                 return;
             }
             const allShortcuts = parentWindow.__formShortcutsMap || {};
-            for (const [key, shortcutList] of Object.entries(allShortcuts)) {
-                for (const shortcut of shortcutList) {
+            for (const [key, shortcutDefinitions] of Object.entries(allShortcuts)) {
+                const definitions = Array.isArray(shortcutDefinitions)
+                    ? shortcutDefinitions
+                    : [shortcutDefinitions];
+                for (const definition of definitions) {
+                    const shortcut = typeof definition === 'string'
+                        ? definition
+                        : definition.shortcut;
                     const parts = shortcut.toLowerCase().split('+');
                     const hasCtrl = parts.includes('ctrl');
                     const hasAlt = parts.includes('alt');
@@ -69,21 +72,47 @@ def add_form_shortcuts(**shortcuts):
                         hasMeta === e.metaKey &&
                         e.key.toLowerCase() === mainKey) {
 
-                        e.preventDefault();
+                        const root = doc.querySelector(`.st-key-${CSS.escape(key)}`);
+                        if (!root) {
+                            continue;
+                        }
 
-                        let el = doc.querySelector(`.st-key-${key} button`) ||
-                                 doc.querySelector(`.st-key-${key} input`) ||
-                                 doc.querySelector(`[data-testid="${key}"]`) ||
-                                 doc.querySelector(
-                                     `button:has([data-testid="baseButton-${key}"])`
-                                 ) ||
-                                 doc.querySelector(`[aria-label="${key}"]`);
+                        let el;
+                        if (definition.option !== undefined) {
+                            const labels = Array.from(root.querySelectorAll('label'));
+                            el = labels.find(label => {
+                                const radio = label.querySelector(
+                                    'input[type="radio"]'
+                                );
+                                return (
+                                    radio &&
+                                    label.innerText.trim() === definition.option
+                                );
+                            });
+                            if (!el) {
+                                const options = Array.from(
+                                    root.querySelectorAll('[role="radio"]')
+                                );
+                                el = options.find(option => {
+                                    const label = (
+                                        option.getAttribute('aria-label') ||
+                                        option.innerText ||
+                                        option.textContent || ''
+                                    ).trim();
+                                    return label === definition.option;
+                                });
+                            }
+                        } else {
+                            el = root.querySelector('input[type="checkbox"]') ||
+                                 root.querySelector('[role="checkbox"]');
+                        }
 
                         if (!el) {
-                            return;
+                            continue;
                         }
+                        e.preventDefault();
                         el.click();
-                        el.focus();
+                        if (el.focus) el.focus();
                         return;
                     }
                 }
@@ -91,9 +120,10 @@ def add_form_shortcuts(**shortcuts):
         };
         doc.addEventListener('keydown', parentWindow.__formShortcutsListener);
         parentWindow.__formShortcutsInitialized = true;
+        parentWindow.__formShortcutsVersion = shortcutsVersion;
     }
 
-    Object.assign(parentWindow.__formShortcutsMap, shortcuts);
+    parentWindow.__formShortcutsMap = shortcuts;
     </script>"""
     )
 

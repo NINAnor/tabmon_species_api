@@ -3,9 +3,8 @@
 import pandas as pd
 import streamlit as st
 
-from ui.ui_shortcuts import add_form_shortcuts
-
 from session.session_manager import bump_expert_form_key
+from ui.ui_shortcuts import add_form_shortcuts
 from utils import (
     get_species_display_names,
     load_species_translations,
@@ -262,55 +261,6 @@ def render_fp_characterization_fragment(prefix, fk, all_species, last_fp):
             value=last_fp.get("fp_comment", ""),
             key=f"{prefix}_comment_{fk}",
         )
-
-
-def render_confidence_fragment(prefix, fk, initial=None):
-    """Annotation-confidence selector, rendered OUTSIDE the form.
-
-    Three buttons with native keyboard shortcuts (q/w/e). Native button
-    shortcuts ignore text fields, and the fragment rerun is local, so
-    playback is never interrupted. Clicks must not fall inside the form
-    (buttons inside st.form would submit it), and the selection is read
-    from session state at submit time.
-
-    The session value is written with setdefault so the prefill only
-    applies on the fragment's first render for this form key.
-
-    Args:
-        prefix: Session-key prefix ("expert" or "review").
-        fk: Form key so the selection resets when the clip changes.
-        initial: Confidence to prefill on first render (None otherwise).
-    """
-    session_key = f"{prefix}_confidence_val_{fk}"
-    st.session_state.setdefault(session_key, initial)
-    selected = st.session_state[session_key]
-
-    st.markdown("**Confidence:**")
-    col_low, col_moderate, col_high = st.columns(3)
-    with col_low:
-        if st.button(
-            "✅ Low" if selected == "Low" else "Low",
-            key=f"{prefix}_conf_low_{fk}",
-            shortcut="q",
-            use_container_width=True,
-        ):
-            st.session_state[session_key] = "Low"
-    with col_moderate:
-        if st.button(
-            "✅ Moderate" if selected == "Moderate" else "Moderate",
-            key=f"{prefix}_conf_moderate_{fk}",
-            shortcut="w",
-            use_container_width=True,
-        ):
-            st.session_state[session_key] = "Moderate"
-    with col_high:
-        if st.button(
-            "✅ High" if selected == "High" else "High",
-            key=f"{prefix}_conf_high_{fk}",
-            shortcut="e",
-            use_container_width=True,
-        ):
-            st.session_state[session_key] = "High"
 
 
 def _collect_fp_widget_values(prefix, fk):
@@ -626,8 +576,6 @@ def render_pro_validation_form(result, selections):
             "fp", fk, all_species_for_prefill, last_fp
         )
 
-        render_confidence_fragment("expert", fk, last_fields.get("user_confidence"))
-
         with st.form(f"expert_validation_form_{fk}"):
             st.markdown("#### Species detected by BirdNET in this clip:")
             st.markdown("**Select which species you can actually hear:**")
@@ -734,22 +682,6 @@ def render_pro_validation_form(result, selections):
                 ),
             )
 
-            # Keyboard shortcuts: "1" toggles the top (highest-confidence)
-            # species checkbox, "2" toggles "None of the listed species are
-            # present", "3" toggles "No bird species audible", "4" toggles
-            # "Unidentified bird present". Guarded so we never reference a
-            # checkbox key that doesn't exist for clips with no BirdNET
-            # detections. Plain keys require the input-field guard from
-            # add_form_shortcuts (typing "1"/"2"/"3"/"4" in text fields must
-            # not toggle anything).
-            shortcut_bindings = {}
-            if len(species_data) >= 1:
-                shortcut_bindings[f"species_0_{fk}"] = "1"
-            shortcut_bindings[f"none_of_above_{fk}"] = "2"
-            shortcut_bindings[f"no_bird_audible_{fk}"] = "3"
-            shortcut_bindings[f"unidentified_bird_{fk}"] = "4"
-            add_form_shortcuts(**shortcut_bindings)
-
             st.markdown("---")
 
             # Additional species input with autocomplete (multiselect)
@@ -765,6 +697,39 @@ def render_pro_validation_form(result, selections):
                 placeholder="Start typing to search...",
                 key=f"other_species_{fk}",
             )
+
+            st.markdown("---")
+
+            confidence_options = ["Low", "Moderate", "High"]
+            prefilled_confidence = last_fields.get("user_confidence")
+            user_confidence = st.radio(
+                "**How confident are you in your annotations?**",
+                options=confidence_options,
+                index=(
+                    confidence_options.index(prefilled_confidence)
+                    if prefilled_confidence in confidence_options
+                    else None
+                ),
+                horizontal=True,
+                key=f"user_confidence_{fk}",
+                help=(
+                    "Rate your overall confidence in the species "
+                    "identifications above"
+                ),
+            )
+
+            shortcut_bindings = {}
+            if len(species_data) >= 1:
+                shortcut_bindings[f"species_0_{fk}"] = "1"
+            shortcut_bindings[f"none_of_above_{fk}"] = "2"
+            shortcut_bindings[f"no_bird_audible_{fk}"] = "3"
+            shortcut_bindings[f"unidentified_bird_{fk}"] = "4"
+            shortcut_bindings[f"user_confidence_{fk}"] = [
+                {"shortcut": "q", "option": "Low"},
+                {"shortcut": "w", "option": "Moderate"},
+                {"shortcut": "e", "option": "High"},
+            ]
+            add_form_shortcuts(**shortcut_bindings)
 
             st.markdown("---")
 
@@ -842,7 +807,7 @@ def render_pro_validation_form(result, selections):
                     unidentified_bird,
                     other_species_list,
                     user_notes,
-                    st.session_state.get(f"expert_confidence_val_{fk}"),
+                    user_confidence,
                     user_comments,
                     vocalization_types,
                     species_data,
