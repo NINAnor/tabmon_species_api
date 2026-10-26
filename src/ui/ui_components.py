@@ -56,13 +56,14 @@ def render_pro_help_section():
 
     with st.expander("⌨️ Keyboard Shortcuts", expanded=False):
         st.markdown("""
-- **Ctrl+1** — Toggle the top (highest-confidence) species
-- **Ctrl+2** — Toggle the second species
-- **Ctrl+3** — Toggle "None of the listed species are present"
-- **Ctrl+4** — Toggle "Unidentified bird present"
-- **Enter** — Submit the validation
+- **1** — Toggle the top (highest-confidence) species
+- **2** — Toggle "None of the listed species are present"
+- **3** — Toggle "No bird species audible"
+- **4** — Toggle "Unidentified bird present"
+- **q / w / e** — Confidence: Low / Moderate / High
 - **a** — Previous clip
 - **d** — Next clip
+- **Enter** — Submit the validation
 """)
 
 

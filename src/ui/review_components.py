@@ -12,6 +12,7 @@ from handlers.validation_handlers import (
     _extract_scientific,
     _get_all_species_list,
     _parse_validation_record_for_prefill,
+    render_confidence_fragment,
     render_fp_characterization_fragment,
 )
 from ui.ui_utils import (
@@ -375,6 +376,7 @@ def _render_cross_validation_form(record, selections):
             )
             last_fp = parsed_own.get("fp_form_data") or {}
         render_fp_characterization_fragment("xfp", fk, review_all_species, last_fp)
+        render_confidence_fragment("review", fk)
 
         with st.form(f"cross_validation_form_{fk}"):
             if is_update_mode:
@@ -474,15 +476,6 @@ def _render_cross_validation_form(record, selections):
 
             st.markdown("---")
 
-            # Confidence rating
-            user_confidence = st.radio(
-                "**Confidence:**",
-                options=["Low", "Moderate", "High"],
-                index=None,
-                horizontal=True,
-                key=f"review_confidence_{fk}",
-            )
-
             # Comments — pre-filled from original when in update mode
             original_comments = str(record.get("user_comments", ""))
             original_comments = "" if original_comments == "nan" else original_comments
@@ -508,7 +501,7 @@ def _render_cross_validation_form(record, selections):
                     selections,
                     selected_species,
                     vocalization_types,
-                    user_confidence,
+                    st.session_state.get(f"review_confidence_val_{fk}"),
                     user_comments,
                     extra_species_raw,
                     is_update=is_update_mode,
