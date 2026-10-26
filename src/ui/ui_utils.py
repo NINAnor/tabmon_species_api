@@ -144,18 +144,9 @@ def _get_site_info(deployment_id):
 
     Returns (site_name, cluster) tuple.
     """
-    from database.queries import get_device_site_map
+    from database.queries import get_site_info_for_deployment
 
-    device_site_map = get_device_site_map()
-    if not device_site_map:
-        return deployment_id, None
-
-    # Extract device_id: last segment of deployment_id (e.g. 3b425ce9)
-    device_id = (
-        deployment_id.rsplit("_", 1)[-1] if "_" in deployment_id else deployment_id
-    )
-
-    info = device_site_map.get(device_id)
+    info = get_site_info_for_deployment(deployment_id)
     if info:
         return info["site"], info["cluster"]
     return deployment_id, None

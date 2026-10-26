@@ -1,5 +1,6 @@
 """Shared utility functions for Expert mode."""
 
+import ast
 import tempfile
 from pathlib import Path
 
@@ -15,6 +16,28 @@ from config import (
     S3_ENDPOINT,
     S3_SECRET_ACCESS_KEY,
 )
+
+
+def parse_list_cell(value):
+    """Parse a CSV cell that may contain a list representation.
+
+    Cells written by `save_pro_validation_response` hold Python-list
+    reprs (e.g. "['Other animal', 'Bird']"). Older rows contain a single
+    plain value or 'nan'. Always returns a list of strings.
+    """
+    text = "" if value is None else str(value)
+    text = "" if text.lower() == "nan" else text.strip()
+    if not text:
+        return []
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, list | tuple):
+                return [str(item) for item in parsed]
+        except (ValueError, SyntaxError):
+            # Fall through: keep the raw cell text as a single item.
+            return [text]
+    return [text]
 
 
 @st.cache_data
@@ -113,6 +136,14 @@ def save_pro_validation_response(validation_data):
             "|".join(str(item) for item in value) if isinstance(value, list) else value
         )
 
+    def _list_repr_cell(value):
+        """Serialize a multi-value column as a list cell (user preference):
+        e.g. "['Other animal', 'Bird']". pandas' to_csv quotes the cell
+        because of the commas, and parse_list_cell reads it back."""
+        if isinstance(value, list):
+            return str(value)
+        return value
+
     validation_data_copy = {
         **validation_data,
         "identified_species": list_to_string(validation_data.get("identified_species")),
@@ -131,6 +162,7 @@ def save_pro_validation_response(validation_data):
         "user_notes": list_to_string(validation_data.get("user_notes")),
         "is_cross_validation": validation_data.get("is_cross_validation", False),
         "is_update": validation_data.get("is_update", False),
+        "is_fp_assessment": validation_data.get("is_fp_assessment", False),
         "fp_target_species": list_to_string(
             validation_data.get("fp_target_species")
         ),
@@ -139,6 +171,12 @@ def save_pro_validation_response(validation_data):
         ),
         "fp_likely_mechanism": list_to_string(
             validation_data.get("fp_likely_mechanism")
+        ),
+        "fp_source_category": _list_repr_cell(
+            validation_data.get("fp_source_category")
+        ),
+        "fp_source_detail": _list_repr_cell(
+            validation_data.get("fp_source_detail")
         ),
     }
 

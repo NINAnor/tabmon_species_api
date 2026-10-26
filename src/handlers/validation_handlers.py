@@ -4,7 +4,72 @@ import pandas as pd
 import streamlit as st
 from streamlit_shortcuts import add_shortcuts
 
-from utils import get_species_display_names, load_species_translations
+from session.session_manager import bump_expert_form_key
+from utils import (
+    get_species_display_names,
+    load_species_translations,
+    parse_list_cell,
+)
+
+# Sentinels written to the identified_species column for "no species"
+# statements. NONE_DETECTED: none of the BirdNET-detected species are
+# actually present (other birds may be audible — list them below).
+# UNIDENTIFIED_BIRD_PRESENT: a bird call/song is audible but its species
+# cannot be determined. NO_BIRD_AUDIBLE: complete silence, no bird of any
+# kind is audible.
+NO_BIRD_AUDIBLE = "NO_BIRD_AUDIBLE"
+
+# FP source checkbox labels (multi-select). "Specific bird species" and
+# "Other bird (unidentified)" additionally reveal a species picker / text
+# input when ticked.
+FP_SOURCE_SPECIES = "Specific bird species"
+FP_SOURCE_OTHER_BIRD = "Other bird (unidentified)"
+FP_SOURCE_OPTIONS = [
+    FP_SOURCE_SPECIES,
+    FP_SOURCE_OTHER_BIRD,
+    "Other animal — Amphibian/Frogs",
+    "Other animal — Insect/Cricket",
+    "Other animal — Other Animal",
+    "Environmental — Rain",
+    "Environmental — Wind",
+    "Environmental — Other Environmental Noise",
+    "Anthropogenic — Aircraft",
+    "Anthropogenic — Traffic/Car",
+    "Anthropogenic — Other Anthropogenic",
+    "Unclear",
+]
+
+# Checkbox label -> (fp_source_category, fp_source_detail) pair, except the
+# two special sources handled separately (species picker / free text).
+_FP_CATEGORY_DETAIL_BY_LABEL = {
+    "Other animal — Amphibian/Frogs": ("Other animal", "Amphibian/Frogs"),
+    "Other animal — Insect/Cricket": ("Other animal", "Insect/Cricket"),
+    "Other animal — Other Animal": ("Other animal", "Other Animal"),
+    "Environmental — Rain": ("Environmental", "Rain"),
+    "Environmental — Wind": ("Environmental", "Wind"),
+    "Environmental — Other Environmental Noise": (
+        "Environmental",
+        "Other Environmental Noise",
+    ),
+    "Anthropogenic — Aircraft": ("Anthropogenic", "Aircraft"),
+    "Anthropogenic — Traffic/Car": ("Anthropogenic", "Traffic/Car"),
+    "Anthropogenic — Other Anthropogenic": (
+        "Anthropogenic",
+        "Other Anthropogenic",
+    ),
+    "Unclear": ("Unclear", ""),
+}
+
+FP_MECHANISM_OPTIONS = [
+    "Acoustic similarity",
+    "Partial vocalisation",
+    "Overlapping signal",
+    "Low SNR / masking",
+    "Faint/distant vocalization",
+    "Other / unclear",
+]
+
+FP_CERTAINTY_OPTIONS = ["Low", "Medium", "High"]
 
 
 @st.cache_data
@@ -25,6 +90,21 @@ def _get_all_species_list(language_code="Scientific_Name"):
         for _, row in translations_df.iterrows()
     ]
     return sorted(species_list)
+
+
+def _extract_scientific(display_name):
+    """Parse "Common Name (Scientific Name)" back to the pure scientific name.
+
+    Non-scientific strings (free text like 'lark, sparrow') pass through
+    unchanged.
+    """
+    if (
+        not display_name
+        or " (" not in display_name
+        or not display_name.endswith(")")
+    ):
+        return display_name
+    return display_name.split(" (")[-1].rstrip(")")
 
 
 def _scientific_to_display_option(scientific_name, language_code, all_species):
@@ -59,12 +139,283 @@ def _scientific_to_display_option(scientific_name, language_code, all_species):
     return candidate if candidate in all_species else None
 
 
+_FP_CURSOR_HELP = (
+    "CTE placeholder — replaced below when the functions are defined."
+)
+
+
+def render_fp_characterization_fragment(prefix, fk, all_species, last_fp):
+    """False-Positive characterization block, rendered OUTSIDE the form.
+
+    Wrapped in @st.fragment so toggling the main checkbox reruns only this
+    block (instant open/close of the FP fields, no full-page rerun, audio
+    keeps playing). Widget values are collected at submit time via
+    `_collect_fp_widget_values`.
+
+    Args:
+        prefix: Key prefix ("fp" in the validation form, "xfp" in review).
+        fk: Form key so all widget keys reset when the clip changes.
+        all_species: Options for the confuser-species picker.
+        last_fp: Prefill dict (see `_parse_validation_record_for_prefill`).
+    """
+    st.markdown("#### 🔬 False-Positive assessment (optional)")
+    st.checkbox(
+        "This clip's BirdNET detections are false positives",
+        value=last_fp.get("assessment", False),
+        key=f"{prefix}_assessed_{fk}",
+        help=(
+            "Tick if at least one BirdNET detection above was wrong and you "
+            "want to characterize what confused the model"
+        ),
+    )
+    if not st.session_state.get(f"{prefix}_assessed_{fk}", False):
+        st.caption(
+            "Tick the box above to open the False-Positive CHARACTERIZATION "
+            "fields."
+        )
+        return
+
+    with st.container(border=True):
+        st.markdown(
+            "**What is the likely source/confuser?** (tick all that apply)"
+        )
+        prefill_sources = last_fp.get("ticked_sources") or []
+        half = (len(FP_SOURCE_OPTIONS) + 1) // 2
+        col_a, col_b = st.columns(2)
+        chunks = (FP_SOURCE_OPTIONS[:half], FP_SOURCE_OPTIONS[half:])
+        for column, chunk in zip((col_a, col_b), chunks, strict=True):
+            with column:
+                for sig in chunk:
+                    st.checkbox(
+                        sig,
+                        value=sig in prefill_sources,
+                        key=f"{prefix}_src_{sig}_{fk}",
+                    )
+
+        ticked_sources = [
+            sig
+            for sig in FP_SOURCE_OPTIONS
+            if st.session_state.get(f"{prefix}_src_{sig}_{fk}", False)
+        ]
+
+        if FP_SOURCE_SPECIES in ticked_sources:
+            prefilled_fp_species = last_fp.get("fp_species")
+            st.selectbox(
+                "If 'Specific bird species': which species?",
+                options=all_species,
+                index=(
+                    all_species.index(prefilled_fp_species)
+                    if prefilled_fp_species in all_species
+                    else None
+                ),
+                placeholder="Start typing to search...",
+                key=f"{prefix}_species_{fk}",
+            )
+        if FP_SOURCE_OTHER_BIRD in ticked_sources:
+            st.text_input(
+                "If 'Other bird (unidentified)': describe "
+                "(e.g. 'lark, sparrow, finch, etc.')",
+                value=last_fp.get("fp_other_bird_text", ""),
+                key=f"{prefix}_other_bird_{fk}",
+            )
+
+        fp_vocal_options = ["", "Song", "Call", "Other/Unknown"]
+        prefilled_fp_vocal = last_fp.get("fp_vocalization", "")
+        st.selectbox(
+            "Vocalization type of confuser (optional)",
+            options=fp_vocal_options,
+            index=(
+                fp_vocal_options.index(prefilled_fp_vocal)
+                if prefilled_fp_vocal in fp_vocal_options
+                else 0
+            ),
+            key=f"{prefix}_vocal_{fk}",
+        )
+
+        st.markdown("**Likely confusion mechanism:**")
+        prefilled_mechanisms = last_fp.get("fp_mechanism", []) or []
+        mid = (len(FP_MECHANISM_OPTIONS) + 1) // 2
+        m1, m2 = st.columns(2)
+        for column, chunk in (
+            (m1, FP_MECHANISM_OPTIONS[:mid]),
+            (m2, FP_MECHANISM_OPTIONS[mid:]),
+        ):
+            with column:
+                for mechanism in chunk:
+                    st.checkbox(
+                        mechanism,
+                        value=mechanism in prefilled_mechanisms,
+                        key=f"{prefix}_mech_{mechanism}_{fk}",
+                    )
+
+        prefilled_fp_certainty = last_fp.get("fp_certainty")
+        st.radio(
+            "Certainty",
+            options=FP_CERTAINTY_OPTIONS,
+            index=(
+                FP_CERTAINTY_OPTIONS.index(prefilled_fp_certainty)
+                if prefilled_fp_certainty in FP_CERTAINTY_OPTIONS
+                else None
+            ),
+            horizontal=True,
+            key=f"{prefix}_certainty_{fk}",
+        )
+        st.text_input(
+            "Comment (optional — exceptional cases only)",
+            value=last_fp.get("fp_comment", ""),
+            key=f"{prefix}_comment_{fk}",
+        )
+
+
+def _collect_fp_widget_values(prefix, fk):
+    """Read the current FP characterization widget values from session state.
+
+    Complements `render_fp_characterization_fragment`, which lives outside
+    the form — its widgets can't be passed as form values, so the submit
+    handler reads them here. Species/other-bird detail are only read when
+    their parent source checkbox is ticked (the widget may not exist
+    otherwise).
+    """
+    ticked = [
+        sig
+        for sig in FP_SOURCE_OPTIONS
+        if st.session_state.get(f"{prefix}_src_{sig}_{fk}", False)
+    ]
+    values = {
+        "assessment": st.session_state.get(f"{prefix}_assessed_{fk}", False),
+        "ticked_sources": ticked,
+        "fp_species": None,
+        "fp_other_bird_text": "",
+        "fp_vocalization": st.session_state.get(f"{prefix}_vocal_{fk}") or "",
+        "fp_mechanism": [
+            mechanism
+            for mechanism in FP_MECHANISM_OPTIONS
+            if st.session_state.get(f"{prefix}_mech_{mechanism}_{fk}", False)
+        ],
+        "fp_certainty": st.session_state.get(f"{prefix}_certainty_{fk}"),
+        "fp_comment": st.session_state.get(f"{prefix}_comment_{fk}") or "",
+    }
+    if FP_SOURCE_SPECIES in ticked:
+        values["fp_species"] = st.session_state.get(f"{prefix}_species_{fk}")
+    if FP_SOURCE_OTHER_BIRD in ticked:
+        values["fp_other_bird_text"] = (
+            st.session_state.get(f"{prefix}_other_bird_{fk}") or ""
+        )
+    return values
+
+
+def _empty_fp_columns():
+    """Default (unfilled) fp_* column values for the validation record."""
+    return {
+        "fp_target_species": [],
+        "fp_target_species_confidence": [],
+        "fp_source_category": [],
+        "fp_source_detail": [],
+        "fp_confuser_vocalization": "",
+        "fp_likely_mechanism": [],
+        "fp_certainty": "",
+        "fp_comment": "",
+        "is_fp_assessment": False,
+    }
+
+
+def _build_fp_columns(fp_values, rejected_species, has_detections):
+    """Validate the FP widget values and build the fp_* CSV columns.
+
+    Returns (error_message_or_None, fp_columns_or_None). On success the
+    columns are lists (pipe-joined later on save) such that fp_source_category
+    and fp_source_detail pair up positionally.
+
+    Args:
+        fp_values: dict from `_collect_fp_widget_values`.
+        rejected_species: [(species, confidence)] for every BirdNET detection
+            the annotator did NOT confirm.
+        has_detections: whether the clip had any BirdNET detections at all
+            (a FP assessment of a clip without detections is pointless and
+            blocked).
+    """
+    fp_values = fp_values or {}
+    assessment = bool(fp_values.get("assessment"))
+    ticked = fp_values.get("ticked_sources", []) or []
+    any_field_filled = any(
+        [
+            ticked,
+            fp_values.get("fp_species"),
+            (fp_values.get("fp_other_bird_text") or "").strip(),
+            fp_values.get("fp_vocalization"),
+            fp_values.get("fp_mechanism"),
+            fp_values.get("fp_certainty"),
+            (fp_values.get("fp_comment") or "").strip(),
+        ]
+    )
+
+    if (not assessment) and any_field_filled:
+        return (
+            "🔬 You filled in False-Positive details but didn't tick "
+            "'This clip's BirdNET detections are false positives'. Tick the "
+            "box, or clear the False-Positive fields if this clip isn't a "
+            "false positive.",
+            None,
+        )
+
+    if not assessment:
+        return None, _empty_fp_columns()
+
+    if has_detections and not rejected_species:
+        return (
+            "🔬 You indicated a False-Positive assessment but every listed "
+            "species is still confirmed. Uncheck the species that were "
+            "wrongly detected (or check 'None of the listed species are "
+            "present'), or untick the False-Positive assessment box if this "
+            "clip isn't a false positive.",
+            None,
+        )
+    if FP_SOURCE_SPECIES in ticked and not (fp_values.get("fp_species") or None):
+        return (
+            "🔬 You ticked 'Specific bird species' but didn't select which "
+            "species is the actual source of the false positive.",
+            None,
+        )
+
+    if FP_SOURCE_OTHER_BIRD in ticked and not (
+        fp_values.get("fp_other_bird_text") or ""
+    ).strip():
+        return (
+            "🔬 You ticked 'Other bird (unidentified)' — please describe it "
+            "(which family/type of bird did you hear?).",
+            None,
+        )
+
+    categories = []
+    details = []
+    for sig in ticked:
+        if sig == FP_SOURCE_SPECIES:
+            categories.append("Bird")
+            details.append(_extract_scientific(fp_values.get("fp_species")))
+        elif sig == FP_SOURCE_OTHER_BIRD:
+            categories.append("Other bird")
+            details.append(fp_values.get("fp_other_bird_text", "").strip())
+        else:
+            category, detail = _FP_CATEGORY_DETAIL_BY_LABEL.get(sig, (sig, ""))
+            categories.append(category)
+            details.append(detail)
+
+    return None, {
+        "fp_target_species": [species for species, _ in rejected_species],
+        "fp_target_species_confidence": [conf for _, conf in rejected_species],
+        "fp_source_category": categories,
+        "fp_source_detail": details,
+        "fp_confuser_vocalization": fp_values.get("fp_vocalization") or "",
+        "fp_likely_mechanism": fp_values.get("fp_mechanism") or [],
+        "fp_certainty": fp_values.get("fp_certainty") or "",
+        "fp_comment": fp_values.get("fp_comment") or "",
+        "is_fp_assessment": True,
+    }
+
+
 def _parse_validation_record_for_prefill(record, language_code, all_species):
     """Convert a saved validation CSV row back into the same shape used to
     pre-fill the form's widgets (species, vocalization, FP block, etc.).
-
-    Mirrors the parsing already done for Review Mode's cross-validation form,
-    but produces the exact dict shape `render_pro_validation_form` expects.
     """
 
     def _clean(value):
@@ -79,12 +430,14 @@ def _parse_validation_record_for_prefill(record, language_code, all_species):
 
     none_of_above = "NONE_DETECTED" in identified_list
     unidentified_bird = "UNIDENTIFIED_BIRD_PRESENT" in identified_list
+    no_bird_audible = NO_BIRD_AUDIBLE in identified_list
     species_only_selected = [s for s in identified_list if s in detected_list]
     other_species_raw = [
         s
         for s in identified_list
         if s not in detected_list
-        and s not in ("NONE_DETECTED", "UNIDENTIFIED_BIRD_PRESENT")
+        and s
+        not in ("NONE_DETECTED", "UNIDENTIFIED_BIRD_PRESENT", NO_BIRD_AUDIBLE)
     ]
     other_species_list = [
         _scientific_to_display_option(sci, language_code, all_species) or sci
@@ -102,24 +455,29 @@ def _parse_validation_record_for_prefill(record, language_code, all_species):
     user_notes_str = _clean(record.get("user_notes"))
     user_notes = [s.strip() for s in user_notes_str.split("|") if s.strip()]
 
-    # Reconstruct the original "Likely FP source/confuser" dropdown label
-    # from the saved fp_source_category / fp_source_detail columns.
-    fp_category = _clean(record.get("fp_source_category"))
-    fp_detail = _clean(record.get("fp_source_detail"))
+    # Reconstruct the FP source checkboxes from the saved
+    # fp_source_category / fp_source_detail columns (list cells; older
+    # records have a single plain value, handled identically).
+    fp_categories = parse_list_cell(record.get("fp_source_category"))
+    fp_details = parse_list_cell(record.get("fp_source_detail"))
     fp_species_raw = ""
     fp_other_bird_text = ""
-    if fp_category == "Bird":
-        fp_source = "Specific bird species (choose below)"
-        fp_species_raw = fp_detail
-    elif fp_category == "Other bird":
-        fp_source = "Other bird (unidentified — describe below)"
-        fp_other_bird_text = fp_detail
-    elif fp_category == "Unclear":
-        fp_source = "Unclear"
-    elif fp_category and fp_detail:
-        fp_source = f"{fp_category} — {fp_detail}"
-    else:
-        fp_source = ""
+    ticked_sources = []
+    for idx, category in enumerate(fp_categories):
+        detail = fp_details[idx] if idx < len(fp_details) else ""
+        if category == "Bird":
+            ticked_sources.append(FP_SOURCE_SPECIES)
+            fp_species_raw = detail
+        elif category == "Other bird":
+            ticked_sources.append(FP_SOURCE_OTHER_BIRD)
+            fp_other_bird_text = detail
+        else:
+            for sig, (mapped_cat, mapped_detail) in (
+                _FP_CATEGORY_DETAIL_BY_LABEL.items()
+            ):
+                if mapped_cat == category and mapped_detail == detail:
+                    ticked_sources.append(sig)
+                    break
 
     fp_species = _scientific_to_display_option(
         fp_species_raw, language_code, all_species
@@ -128,22 +486,36 @@ def _parse_validation_record_for_prefill(record, language_code, all_species):
     fp_mechanism_str = _clean(record.get("fp_likely_mechanism"))
     fp_mechanism = [s.strip() for s in fp_mechanism_str.split("|") if s.strip()]
 
+    fp_certainty = _clean(record.get("fp_certainty")) or None
+    fp_vocalization = _clean(record.get("fp_confuser_vocalization"))
+    has_fp_content = any(
+        [
+            ticked_sources,
+            fp_mechanism,
+            fp_vocalization,
+            fp_certainty,
+            _clean(record.get("fp_comment")),
+        ]
+    )
+
     return {
         "species_only_selected": species_only_selected,
         "vocalization_types": vocalization_types,
         "none_of_above": none_of_above,
+        "no_bird_audible": no_bird_audible,
         "unidentified_bird": unidentified_bird,
         "other_species_list": other_species_list,
         "user_confidence": _clean(record.get("user_confidence")) or None,
         "user_notes": user_notes,
         "user_comments": _clean(record.get("user_comments")),
         "fp_form_data": {
-            "fp_source": fp_source,
+            "assessment": bool(has_fp_content),
+            "ticked_sources": ticked_sources,
             "fp_species": fp_species,
             "fp_other_bird_text": fp_other_bird_text,
-            "fp_vocalization": _clean(record.get("fp_confuser_vocalization")),
+            "fp_vocalization": fp_vocalization,
             "fp_mechanism": fp_mechanism,
-            "fp_certainty": _clean(record.get("fp_certainty")) or None,
+            "fp_certainty": fp_certainty,
             "fp_comment": _clean(record.get("fp_comment")),
         },
     }
@@ -198,9 +570,24 @@ def render_pro_validation_form(result, selections):
         )
         last_fp = last_fields.get("fp_form_data") or {}
 
+        # Clip-level False-Positive characterization — rendered ABOVE the
+        # form inside a fragment so that ticking the assessment checkbox
+        # instantly opens the FP fields (rerunning only the fragment, without
+        # a page reload or audio restart). Applies to the BirdNET-detected
+        # species that were rejected (left unchecked, or covered by 'None of
+        # the listed species are present').
+        render_fp_characterization_fragment(
+            "fp", fk, all_species_for_prefill, last_fp
+        )
+
         with st.form(f"expert_validation_form_{fk}"):
             st.markdown("#### Species detected by BirdNET in this clip:")
             st.markdown("**Select which species you can actually hear:**")
+            st.caption(
+                "💡 Picking a vocalization (Call/Song) in the dropdown "
+                "automatically marks that species as heard — no need to "
+                "also tick its checkbox."
+            )
             st.markdown("---")
 
             # Get species and confidence arrays (DuckDB returns actual lists)
@@ -233,7 +620,7 @@ def render_pro_validation_form(result, selections):
 
             # Get all available species for autocomplete (used both for the
             # "Other species not listed above" picker and the clip-level FP
-            # confuser search below)
+            # confuser search above)
             all_species = all_species_for_prefill
 
             # Display checklist. Picking a vocalization type alone (without
@@ -274,10 +661,24 @@ def render_pro_validation_form(result, selections):
                         vocalization_types[species] = vocal_type
 
             none_of_above = st.checkbox(
-                "❌ No bird species audible",
+                "❌ None of the listed species are present",
                 value=last_fields.get("none_of_above", False),
                 key=f"none_of_above_{fk}",
-                help="Check this if you cannot hear any bird in this clip at all",
+                help=(
+                    "Check this if none of the BirdNET-detected species are "
+                    "actually present. If you hear other birds, select them "
+                    "in the 'Other species not listed above' field below."
+                ),
+            )
+
+            no_bird_audible = st.checkbox(
+                "🕊️ No bird species audible",
+                value=last_fields.get("no_bird_audible", False),
+                key=f"no_bird_audible_{fk}",
+                help=(
+                    "Check this if no bird of any kind is audible in this "
+                    "clip at all"
+                ),
             )
 
             unidentified_bird = st.checkbox(
@@ -291,10 +692,10 @@ def render_pro_validation_form(result, selections):
             )
 
             # Keyboard shortcuts: Ctrl+1 / Ctrl+2 toggle the top two species
-            # checkboxes, Ctrl+3 toggles "No bird species audible", Ctrl+4
-            # toggles "Unidentified bird present". Guarded so we never
-            # reference a checkbox key that doesn't exist for clips with
-            # fewer than 2 BirdNET detections.
+            # checkboxes, Ctrl+3 toggles "None of the listed species are
+            # present", Ctrl+4 toggles "Unidentified bird present". Guarded
+            # so we never reference a checkbox key that doesn't exist for
+            # clips with fewer than 2 BirdNET detections.
             shortcut_bindings = {}
             if len(species_data) >= 1:
                 shortcut_bindings[f"species_0_{fk}"] = "ctrl+1"
@@ -303,105 +704,6 @@ def render_pro_validation_form(result, selections):
             shortcut_bindings[f"none_of_above_{fk}"] = "ctrl+3"
             shortcut_bindings[f"unidentified_bird_{fk}"] = "ctrl+4"
             add_shortcuts(**shortcut_bindings)
-
-            # Clip-level False Positive characterization — applies whenever
-            # one or more BirdNET-detected species were rejected (left
-            # unchecked, or covered by "No bird species audible"). One block
-            # per clip rather than per species, since the FP source/confuser
-            # typically describes the whole clip, not an individual row.
-            with st.expander("🔬 Characterize as False Positive (optional)"):
-                fp_source_options = [
-                    "— Not a false positive / N/A —",
-                    "Specific bird species (choose below)",
-                    "Other bird (unidentified — describe below)",
-                    "Other animal — Amphibian/Frogs",
-                    "Other animal — Insect/Cricket",
-                    "Other animal — Other Animal",
-                    "Environmental — Rain",
-                    "Environmental — Wind",
-                    "Environmental — Other Environmental Noise",
-                    "Anthropogenic — Aircraft",
-                    "Anthropogenic — Traffic/Car",
-                    "Anthropogenic — Other Anthropogenic",
-                    "Unclear",
-                ]
-                prefilled_fp_source = last_fp.get("fp_source", "")
-                fp_source = st.selectbox(
-                    "Likely FP source/confuser",
-                    options=fp_source_options,
-                    index=(
-                        fp_source_options.index(prefilled_fp_source)
-                        if prefilled_fp_source in fp_source_options
-                        else 0
-                    ),
-                    key=f"fp_source_{fk}",
-                )
-                prefilled_fp_species = last_fp.get("fp_species")
-                fp_species = st.selectbox(
-                    "If 'Specific bird species': which species?",
-                    options=all_species,
-                    index=(
-                        all_species.index(prefilled_fp_species)
-                        if prefilled_fp_species in all_species
-                        else None
-                    ),
-                    placeholder="Start typing to search...",
-                    key=f"fp_species_{fk}",
-                )
-                fp_other_bird_text = st.text_input(
-                    "If 'Other bird': describe "
-                    "(e.g. 'lark, sparrow, finch, etc.')",
-                    value=last_fp.get("fp_other_bird_text", ""),
-                    key=f"fp_other_bird_{fk}",
-                )
-                fp_vocal_options = ["", "Song", "Call", "Other/Unknown"]
-                prefilled_fp_vocal = last_fp.get("fp_vocalization", "")
-                fp_vocalization = st.selectbox(
-                    "Vocalization type of confuser (optional)",
-                    options=fp_vocal_options,
-                    index=(
-                        fp_vocal_options.index(prefilled_fp_vocal)
-                        if prefilled_fp_vocal in fp_vocal_options
-                        else 0
-                    ),
-                    key=f"fp_vocal_{fk}",
-                )
-                st.markdown("**Likely confusion mechanism:**")
-                mechanism_options = [
-                    "Acoustic similarity",
-                    "Partial vocalisation",
-                    "Overlapping signal",
-                    "Low SNR / masking",
-                    "Other / unclear",
-                ]
-                prefilled_mechanisms = last_fp.get("fp_mechanism", [])
-                fp_mechanism = [
-                    mechanism
-                    for mechanism in mechanism_options
-                    if st.checkbox(
-                        mechanism,
-                        value=mechanism in prefilled_mechanisms,
-                        key=f"fp_mechanism_{mechanism}_{fk}",
-                    )
-                ]
-                fp_certainty_options = ["Low", "Medium", "High"]
-                prefilled_fp_certainty = last_fp.get("fp_certainty")
-                fp_certainty = st.radio(
-                    "Certainty",
-                    options=fp_certainty_options,
-                    index=(
-                        fp_certainty_options.index(prefilled_fp_certainty)
-                        if prefilled_fp_certainty in fp_certainty_options
-                        else None
-                    ),
-                    horizontal=True,
-                    key=f"fp_certainty_{fk}",
-                )
-                fp_comment = st.text_input(
-                    "Comment (optional — exceptional cases only)",
-                    value=last_fp.get("fp_comment", ""),
-                    key=f"fp_comment_{fk}",
-                )
 
             st.markdown("---")
 
@@ -501,7 +803,7 @@ def render_pro_validation_form(result, selections):
                 "✅ Submit Validation",
                 type="primary",
                 use_container_width=True,
-                shortcut="Ctrl+Enter",
+                shortcut="Enter",
             )
 
             if submitted:
@@ -510,6 +812,7 @@ def render_pro_validation_form(result, selections):
                     selections,
                     species_only_selected,
                     none_of_above,
+                    no_bird_audible,
                     unidentified_bird,
                     other_species_list,
                     user_notes,
@@ -517,15 +820,7 @@ def render_pro_validation_form(result, selections):
                     user_comments,
                     vocalization_types,
                     species_data,
-                    {
-                        "fp_source": fp_source,
-                        "fp_species": fp_species,
-                        "fp_other_bird_text": fp_other_bird_text,
-                        "fp_vocalization": fp_vocalization,
-                        "fp_mechanism": fp_mechanism,
-                        "fp_certainty": fp_certainty,
-                        "fp_comment": fp_comment,
-                    },
+                    _collect_fp_widget_values("fp", fk),
                     existing_record is not None,
                 )
 
@@ -535,6 +830,7 @@ def _handle_pro_validation_submission(
     selections,
     species_only_selected,
     none_of_above,
+    no_bird_audible,
     unidentified_bird,
     other_species_list,
     user_notes,
@@ -542,96 +838,100 @@ def _handle_pro_validation_submission(
     user_comments,
     vocalization_types,
     species_data=None,
-    fp_form_data=None,
+    fp_values=None,
     has_existing_record=False,
 ):
     """Handle Expert mode validation form submission."""
-    if not user_confidence:
-        st.error("Please rate your confidence before submitting.")
+    # Confidence gating (user feedback): the submission is blocked only if
+    # NEITHER the annotation confidence NOR the FP block's certainty is
+    # selected — either one is sufficient. If only the FP certainty was
+    # chosen, user_confidence stays blank in the CSV (the two are distinct
+    # and are never blended).
+    fp_certainty = (fp_values or {}).get("fp_certainty")
+    if not user_confidence and not fp_certainty:
+        st.error(
+            "Please rate your confidence in the annotation above, or the "
+            "certainty of the False-Positive assessment."
+        )
         return
 
-    # --- Primary identification consistency check (prevent ambiguous /
-    # incomplete submissions) ---
-    # Exactly one of: a specific species marked present, "No bird species
-    # audible", or "Unidentified bird present" must be chosen.
+    # --- Primary identification: relaxed on purpose (user feedback) ---
+    # Confidence is the only hard requirement. A submission is valid if it
+    # carries at least one piece of annotation information: confirmed
+    # species, "None of the listed species are present", "No bird species
+    # audible", "Unidentified bird present", additional non-BirdNET
+    # species, or a False-Positive assessment. Only genuinely contradictory
+    # input is blocked.
     has_species = bool(species_only_selected)
     has_none = bool(none_of_above)
+    has_silence = bool(no_bird_audible)
     has_unidentified = bool(unidentified_bird)
-    chosen_count = sum([has_species, has_none, has_unidentified])
+    has_other = bool(other_species_list)
+    fp_assessment = bool((fp_values or {}).get("assessment"))
 
-    if chosen_count == 0:
+    if has_none and has_species:
         st.error(
-            "Please mark at least one species, 'No bird species audible', or "
-            "'Unidentified bird present' before submitting."
+            "Contradictory annotation: you both confirmed BirdNET species "
+            "and checked 'None of the listed species are present'. Untick "
+            "one or the other."
         )
         return
 
-    if chosen_count > 1:
+    if has_silence and any([has_species, has_unidentified, has_other]):
         st.error(
-            "Please choose only one: specific species present, 'No bird "
-            "species audible', or 'Unidentified bird present' — these are "
-            "mutually exclusive."
+            "Contradictory annotation: 'No bird species audible' means no "
+            "bird of any kind is audible, but you also marked birds above. "
+            "Untick the contradictory options."
         )
         return
 
+    if not any(
+        [
+            has_species,
+            has_none,
+            has_silence,
+            has_unidentified,
+            has_other,
+            fp_assessment,
+        ]
+    ):
+        st.error(
+            "Please annotate this clip: mark which species you hear, check "
+            "'None of the listed species are present', 'No bird species "
+            "audible' or 'Unidentified bird present', add species not "
+            "listed above, or tick the False-Positive assessment box."
+        )
+        return
+
+    selected_species = list(species_only_selected)
     if has_none:
-        selected_species = ["NONE_DETECTED"]
-    elif has_unidentified:
-        selected_species = ["UNIDENTIFIED_BIRD_PRESENT"]
-    else:
-        selected_species = species_only_selected
+        selected_species.append("NONE_DETECTED")
+    if has_silence:
+        selected_species.append(NO_BIRD_AUDIBLE)
+    if has_unidentified:
+        selected_species.append("UNIDENTIFIED_BIRD_PRESENT")
 
     # --- FP characterization consistency checks (prevent silent data loss) ---
-    # The FP block's fields are only saved if the "Likely FP source/confuser"
-    # dropdown is set AND at least one species was left unconfirmed. If either
-    # holds without the other, block submission instead of silently dropping
+    # The FP block's fields are only saved when the FP assessment box is
+    # ticked AND at least one species was left unconfirmed. If either holds
+    # without the other, block submission instead of silently dropping
     # whatever the annotator filled in.
-    fp_source = (fp_form_data or {}).get("fp_source", "")
-    fp_source_is_set = fp_source not in ("", "— Not a false positive / N/A —")
     rejected_species = [
         (species, conf_val)
         for species, conf_val in (species_data or [])
-        if species not in selected_species
+        if species not in species_only_selected
     ]
-    fp_any_other_field_filled = any(
-        [
-            (fp_form_data or {}).get("fp_vocalization"),
-            (fp_form_data or {}).get("fp_mechanism"),
-            (fp_form_data or {}).get("fp_certainty"),
-            ((fp_form_data or {}).get("fp_comment") or "").strip(),
-            (fp_form_data or {}).get("fp_species"),
-            ((fp_form_data or {}).get("fp_other_bird_text") or "").strip(),
-        ]
+    has_detections = bool(species_data)
+    error, fp_columns = _build_fp_columns(
+        fp_values, rejected_species, has_detections
     )
-
-    if fp_source_is_set and not rejected_species:
-        st.error(
-            "🔬 You selected a 'Likely FP source/confuser' but every listed "
-            "species is still confirmed. Uncheck the species this applies "
-            "to (or check 'No bird species audible'), or reset the FP "
-            "source back to '— Not a false positive / N/A —' if this clip "
-            "isn't a false positive."
-        )
+    if error:
+        st.error(error)
         return
-
-    if not fp_source_is_set and fp_any_other_field_filled:
-        st.error(
-            "🔬 You've filled in False Positive details but haven't selected "
-            "a 'Likely FP source/confuser'. Please select one, or clear the "
-            "False Positive fields if this clip isn't a false positive."
-        )
-        return
-
-    is_fp_characterized = fp_source_is_set and bool(rejected_species)
 
     # Extract scientific names from multiselect
     # Format: "Common Name (Scientific Name)"
-    additional_species = [
-        species_str.split(" (")[-1].rstrip(")")
-        if " (" in species_str and species_str.endswith(")")
-        else species_str
-        for species_str in other_species_list
-    ]
+    additional_species = [_extract_scientific(s) for s in other_species_list]
 
     all_identified_species = selected_species + additional_species
 
@@ -640,17 +940,10 @@ def _handle_pro_validation_submission(
     birdnet_confidences = result.get("confidence_array", []) or []
 
     # Look up site metadata from site_info.csv
-    from database.queries import get_device_site_map
+    from database.queries import get_site_info_for_deployment
 
     deployment_id = result.get("deployment_id", "")
-    device_site_map = get_device_site_map()
-    # Try lookup by deployment_id first, then by device_id (last segment)
-    site_info = device_site_map.get(deployment_id)
-    if not site_info:
-        device_id = (
-            deployment_id.rsplit("_", 1)[-1] if "_" in deployment_id else deployment_id
-        )
-        site_info = device_site_map.get(device_id, {})
+    site_info = get_site_info_for_deployment(deployment_id)
 
     # Prepare validation data
     validation_data = {
@@ -672,71 +965,16 @@ def _handle_pro_validation_submission(
         "timestamp": pd.Timestamp.now(),
         "is_update": has_existing_record,
         "is_cross_validation": False,
+        "is_fp_assessment": False,
     }
 
-    # Clip-level False Positive characterization. Applies to all
-    # BirdNET-detected species that were rejected in this clip (left
-    # unchecked, or covered by "No bird species audible"). Left blank when
-    # the FP block wasn't filled in, so TP-only submissions simply have
-    # empty fp_* columns in the same output file.
-    fp_category, fp_detail = "", ""
-    if is_fp_characterized:
-        if fp_source.startswith("Specific bird species"):
-            fp_category = "Bird"
-            # Parse "Common Name (Scientific Name)" back to pure scientific
-            # name, same as the "Other species not listed above" field, so
-            # fp_source_detail stays consistent with fp_target_species
-            # regardless of the selected display language.
-            raw_fp_species = fp_form_data.get("fp_species") or ""
-            fp_detail = (
-                raw_fp_species.split(" (")[-1].rstrip(")")
-                if " (" in raw_fp_species and raw_fp_species.endswith(")")
-                else raw_fp_species
-            )
-        elif fp_source.startswith("Other bird"):
-            fp_category = "Other bird"
-            fp_detail = fp_form_data.get("fp_other_bird_text") or ""
-        elif " — " in fp_source:
-            fp_category, fp_detail = fp_source.split(" — ", 1)
-        else:
-            fp_category, fp_detail = fp_source, ""
-
-    validation_data.update(
-        {
-            "fp_target_species": (
-                [species for species, _ in rejected_species]
-                if is_fp_characterized
-                else []
-            ),
-            "fp_target_species_confidence": (
-                [conf_val for _, conf_val in rejected_species]
-                if is_fp_characterized
-                else []
-            ),
-            "fp_source_category": fp_category,
-            "fp_source_detail": fp_detail,
-            "fp_confuser_vocalization": (
-                (fp_form_data or {}).get("fp_vocalization", "")
-                if is_fp_characterized
-                else ""
-            ),
-            "fp_likely_mechanism": (
-                (fp_form_data or {}).get("fp_mechanism", [])
-                if is_fp_characterized
-                else []
-            ),
-            "fp_certainty": (
-                ((fp_form_data or {}).get("fp_certainty") or "")
-                if is_fp_characterized
-                else ""
-            ),
-            "fp_comment": (
-                (fp_form_data or {}).get("fp_comment", "")
-                if is_fp_characterized
-                else ""
-            ),
-        }
-    )
+    # Clip-level False Positive characterization (built by
+    # _build_fp_columns). Applies to all BirdNET-detected species that were
+    # rejected in this clip (left unchecked, or covered by 'None of the
+    # listed species are present'). Left blank when the FP box wasn't
+    # ticked, so TP-only submissions simply have empty fp_* columns in the
+    # same output file.
+    validation_data.update(fp_columns)
 
     # Save validation response (includes FP characterization columns)
     from utils import save_pro_validation_response
@@ -751,7 +989,7 @@ def _handle_pro_validation_submission(
         )
 
     # Increment form key to reset all form fields
-    st.session_state.expert_form_key = st.session_state.get("expert_form_key", 0) + 1
+    bump_expert_form_key()
 
     if has_existing_record:
         st.toast("✅ Correction saved!")

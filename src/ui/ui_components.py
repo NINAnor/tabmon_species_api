@@ -4,6 +4,7 @@ import os
 
 import streamlit as st
 
+from session.session_manager import bump_expert_form_key
 from ui.ui_utils import (
     render_all_validated_message,
     render_audio_player,
@@ -57,10 +58,11 @@ def render_pro_help_section():
         st.markdown("""
 - **Ctrl+1** — Toggle the top (highest-confidence) species
 - **Ctrl+2** — Toggle the second species
-- **Ctrl+3** — Toggle "No bird species audible"
+- **Ctrl+3** — Toggle "None of the listed species are present"
 - **Ctrl+4** — Toggle "Unidentified bird present"
-- **Ctrl+Enter** — Submit the validation
-- **Ctrl+Right** — Next clip
+- **Enter** — Submit the validation
+- **a** — Previous clip
+- **d** — Next clip
 """)
 
 
@@ -89,9 +91,7 @@ def render_pro_clip_section(result, selections):
             if clips and index < len(clips) - 1:
                 st.warning("Clip has no file path and cannot be displayed. Skipping...")
                 st.session_state.expert_clip_index = index + 1
-                st.session_state.expert_form_key = (
-                    st.session_state.get("expert_form_key", 0) + 1
-                )
+                bump_expert_form_key()
                 st.rerun()
         render_all_validated_message(
             mode_name="assigned clips",
@@ -173,25 +173,22 @@ def render_pro_navigation_buttons(selections):
         if st.button(
             "⬅️ Previous",
             help="Go back one clip in your assigned list.",
+            shortcut="a",
             disabled=(index <= 0),
         ):
             st.session_state.expert_clip_index = max(index - 1, 0)
-            st.session_state.expert_form_key = (
-                st.session_state.get("expert_form_key", 0) + 1
-            )
+            bump_expert_form_key()
             st.rerun()
 
     with col_next:
         if st.button(
             "▶️ Next",
             help="Go to the next clip in your assigned list.",
-            shortcut="Ctrl+Right",
+            shortcut="d",
             disabled=(index >= total - 1),
         ):
             st.session_state.expert_clip_index = min(index + 1, max(total - 1, 0))
-            st.session_state.expert_form_key = (
-                st.session_state.get("expert_form_key", 0) + 1
-            )
+            bump_expert_form_key()
             st.rerun()
 
     # If we've reached the end of the list but earlier clips are still
@@ -215,9 +212,7 @@ def render_pro_navigation_buttons(selections):
                 st.session_state.expert_clip_index = get_first_unannotated_index(
                     clips, set(validation_records.keys())
                 )
-                st.session_state.expert_form_key = (
-                    st.session_state.get("expert_form_key", 0) + 1
-                )
+                bump_expert_form_key()
                 st.rerun()
 
 

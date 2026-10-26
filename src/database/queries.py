@@ -56,6 +56,24 @@ def get_device_site_map():
         return {}
 
 
+def get_site_info_for_deployment(deployment_id):
+    """Look up site/cluster/country metadata for a clip's deployment_id.
+
+    Tries a direct deployment_id lookup first, then falls back to the
+    device_id (last segment after '_').
+
+    Returns the info dict, or {} when nothing matches.
+    """
+    device_site_map = get_device_site_map()
+    site_info = device_site_map.get(deployment_id)
+    if site_info:
+        return site_info
+    device_id = (
+        deployment_id.rsplit("_", 1)[-1] if "_" in deployment_id else deployment_id
+    )
+    return device_site_map.get(device_id, {})
+
+
 def list_available_datasets():
     """List all available parquet datasets in the validation_dataset folder."""
     import boto3

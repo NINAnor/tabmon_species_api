@@ -5,13 +5,61 @@ import os
 import pandas as pd
 import streamlit as st
 
-from handlers.validation_handlers import _get_all_species_list
+from handlers.validation_handlers import (
+    NO_BIRD_AUDIBLE,
+    _build_fp_columns,
+    _collect_fp_widget_values,
+    _extract_scientific,
+    _get_all_species_list,
+    _parse_validation_record_for_prefill,
+    render_fp_characterization_fragment,
+)
 from ui.ui_utils import (
     _generate_spectrogram_image,
     render_audio_player,
     render_clip_metadata,
 )
-from utils import extract_clip, get_species_display_names, save_pro_validation_response
+from utils import (
+    extract_clip,
+    get_species_display_names,
+    parse_list_cell,
+    save_pro_validation_response,
+)
+
+
+def _parse_birdnet_lists(record):
+    """Parse BirdNET species/confidences from a review-mode record.
+
+    Returns (species_list, confidence_list, species_data):
+    - species_list: stripped scientific names (pipe-split)
+    - confidence_list: stripped confidence strings (pipe-split, unvalidated)
+    - species_data: list of (species, float_confidence) sorted by
+      confidence descending, 0.0 fallback for missing/invalid values
+      (including "nan" strings)
+    """
+    species_list = [
+        s.strip()
+        for s in str(record.get("birdnet_species_detected", "")).split("|")
+        if s.strip()
+    ]
+    confidence_list = [
+        c.strip()
+        for c in str(record.get("birdnet_confidences", "")).split("|")
+        if c.strip()
+    ]
+    species_data = []
+    for idx, species in enumerate(species_list):
+        conf = 0.0
+        if idx < len(confidence_list):
+            try:
+                parsed = float(confidence_list[idx])
+                if parsed == parsed:  # exclude "nan" strings
+                    conf = parsed
+            except (ValueError, TypeError):
+                pass
+        species_data.append((species, conf))
+    species_data.sort(key=lambda x: x[1], reverse=True)
+    return species_list, confidence_list, species_data
 
 
 def render_review_clip_section(selections):
@@ -123,10 +171,7 @@ def _render_original_validation(record, selections):
 
         # Species checklist — show what the original expert selected
         language_code = selections.get("language_code", "Scientific_Name")
-        species_str = str(record.get("birdnet_species_detected", ""))
-        confidence_str = str(record.get("birdnet_confidences", ""))
-        species_list = [s.strip() for s in species_str.split("|") if s.strip()]
-        confidence_list = [c.strip() for c in confidence_str.split("|") if c.strip()]
+        species_list, _conf_strings, species_data = _parse_birdnet_lists(record)
 
         identified_str = str(record.get("identified_species", ""))
         identified_set = {
@@ -137,20 +182,6 @@ def _render_original_validation(record, selections):
             display_map = get_species_display_names(species_list, language_code)
             scientific_to_display = {sci: disp for disp, sci in display_map.items()}
 
-            # Sort by confidence descending (same order as cross-validation form)
-            species_data = []
-            for idx, species in enumerate(species_list):
-                try:
-                    conf = (
-                        float(confidence_list[idx])
-                        if idx < len(confidence_list)
-                        else 0.0
-                    )
-                except (ValueError, TypeError):
-                    conf = 0.0
-                species_data.append((species, conf))
-            species_data.sort(key=lambda x: x[1], reverse=True)
-
             st.markdown("**Species (BirdNET → Expert):**")
             for species, conf_val in species_data:
                 display_name = scientific_to_display.get(species, species)
@@ -159,7 +190,9 @@ def _render_original_validation(record, selections):
                 st.markdown(f"{icon} {display_name} (conf: {conf_val:.2f})")
 
             if "NONE_DETECTED" in identified_set:
-                st.markdown("❌ **No bird species audible**")
+                st.markdown("❌ **None of the listed species are present**")
+            if NO_BIRD_AUDIBLE in identified_set:
+                st.markdown("🕊️ **No bird species audible**")
             if "UNIDENTIFIED_BIRD_PRESENT" in identified_set:
                 st.markdown(
                     "🤷 **A bird was present but species could not be determined**"
@@ -171,6 +204,7 @@ def _render_original_validation(record, selections):
         extra_species = identified_set - set(species_list) - {
             "NONE_DETECTED",
             "UNIDENTIFIED_BIRD_PRESENT",
+            NO_BIRD_AUDIBLE,
             "nan",
         }
         if extra_species:
@@ -203,30 +237,33 @@ def _render_original_validation(record, selections):
 
         # False Positive characterization (if this clip was characterized
         # as a FP during the primary validation pass)
-        fp_source_category = str(record.get("fp_source_category", "")).strip()
-        if fp_source_category and fp_source_category != "nan":
+        fp_categories = parse_list_cell(record.get("fp_source_category"))
+        if fp_categories:
             st.markdown("---")
             st.markdown("**🔬 False Positive Characterization:**")
 
-            fp_source_detail = str(record.get("fp_source_detail", "")).strip()
-            fp_source_detail = "" if fp_source_detail == "nan" else fp_source_detail
-
-            if fp_source_category == "Bird" and fp_source_detail:
-                detail_display_map = get_species_display_names(
-                    [fp_source_detail], language_code
-                )
-                detail_to_display = {
-                    sci: disp for disp, sci in detail_display_map.items()
-                }
-                source_display = (
-                    f"Specific bird species — "
-                    f"{detail_to_display.get(fp_source_detail, fp_source_detail)}"
-                )
-            elif fp_source_detail:
-                source_display = f"{fp_source_category} — {fp_source_detail}"
-            else:
-                source_display = fp_source_category
-            st.markdown(f"- **Source/confuser:** {source_display}")
+            fp_details = parse_list_cell(record.get("fp_source_detail"))
+            source_parts = []
+            for idx, fp_category in enumerate(fp_categories):
+                fp_detail = fp_details[idx] if idx < len(fp_details) else ""
+                if fp_category == "Bird" and fp_detail:
+                    detail_display_map = get_species_display_names(
+                        [fp_detail], language_code
+                    )
+                    detail_to_display = {
+                        sci: disp for disp, sci in detail_display_map.items()
+                    }
+                    source_parts.append(
+                        f"Specific bird species — "
+                        f"{detail_to_display.get(fp_detail, fp_detail)}"
+                    )
+                elif fp_category == "Other bird" and fp_detail:
+                    source_parts.append(f"Other bird (unidentified) — {fp_detail}")
+                elif fp_detail:
+                    source_parts.append(f"{fp_category} — {fp_detail}")
+                else:
+                    source_parts.append(fp_category)
+            st.markdown("- **Source/confuser:** " + "; ".join(source_parts))
 
             fp_target_str = str(record.get("fp_target_species", "")).strip()
             if fp_target_str and fp_target_str != "nan":
@@ -274,6 +311,7 @@ def _render_navigation(total_count, current_index):
     with col_prev:
         if st.button(
             "← Prev",
+            shortcut="a",
             disabled=(current_index == 0),
             use_container_width=True,
         ):
@@ -292,6 +330,7 @@ def _render_navigation(total_count, current_index):
     with col_next:
         if st.button(
             "Next →",
+            shortcut="d",
             disabled=(current_index >= total_count - 1),
             use_container_width=True,
         ):
@@ -312,18 +351,32 @@ def _render_cross_validation_form(record, selections):
         _render_cross_validated_warning(record, selections)
 
         fk = st.session_state.get("review_form_key", 0)
+        language_code = selections.get("language_code", "Scientific_Name")
+
+        # Automatically determine update vs. cross-validation from the
+        # original annotator's userID vs. the currently logged-in reviewer —
+        # no manual toggle needed, so submitting only takes a single click.
+        original_user_id = str(record.get("userID", "")).strip()
+        current_user_id = str(selections.get("user_id", "")).strip()
+        is_update_mode = bool(original_user_id) and (
+            original_user_id == current_user_id
+        )
+
+        # FP characterization — rendered ABOVE the form inside a fragment so
+        # the assessment checkbox instantly opens the FP fields (no page
+        # rerun beyond the fragment itself). Pre-filled from the record when
+        # the reviewer is the original annotator (update mode). Values are
+        # collected from session state at submit time.
+        review_all_species = _get_all_species_list(language_code)
+        last_fp = {}
+        if is_update_mode:
+            parsed_own = _parse_validation_record_for_prefill(
+                record, language_code, review_all_species
+            )
+            last_fp = parsed_own.get("fp_form_data") or {}
+        render_fp_characterization_fragment("xfp", fk, review_all_species, last_fp)
 
         with st.form(f"cross_validation_form_{fk}"):
-            # Automatically determine update vs. cross-validation from the
-            # original annotator's userID vs. the currently logged-in
-            # reviewer — no manual toggle needed, so submitting only takes
-            # a single click.
-            original_user_id = str(record.get("userID", "")).strip()
-            current_user_id = str(selections.get("user_id", "")).strip()
-            is_update_mode = bool(original_user_id) and (
-                original_user_id == current_user_id
-            )
-
             if is_update_mode:
                 st.info(
                     "✏️ You are the original validator for this clip — "
@@ -345,14 +398,7 @@ def _render_cross_validation_form(record, selections):
                         original_voc_map[sp.strip()] = vtype.strip()
 
             # Species from BirdNET detections
-            species_str = str(record.get("birdnet_species_detected", ""))
-            confidence_str = str(record.get("birdnet_confidences", ""))
-            species_list = [s.strip() for s in species_str.split("|") if s.strip()]
-            confidence_list = [
-                c.strip() for c in confidence_str.split("|") if c.strip()
-            ]
-
-            language_code = selections.get("language_code", "Scientific_Name")
+            species_list, _conf_strings, species_data = _parse_birdnet_lists(record)
 
             scientific_to_display = {}
             if species_list:
@@ -360,20 +406,6 @@ def _render_cross_validation_form(record, selections):
                 scientific_to_display = {
                     sci: disp for disp, sci in display_map.items()
                 }
-
-                # Sort by confidence descending (matches original panel order)
-                species_data = []
-                for idx, species in enumerate(species_list):
-                    try:
-                        conf = (
-                            float(confidence_list[idx])
-                            if idx < len(confidence_list)
-                            else 0.0
-                        )
-                    except (ValueError, TypeError):
-                        conf = 0.0
-                    species_data.append((species, conf))
-                species_data.sort(key=lambda x: x[1], reverse=True)
 
                 selected_species = []
                 vocalization_types = {}
@@ -405,12 +437,28 @@ def _render_cross_validation_form(record, selections):
                 vocalization_types = {}
 
             none_of_above = st.checkbox(
-                "❌ None of the above",
+                "❌ None of the listed species are present",
                 key=f"review_none_{fk}",
+                help=(
+                    "Check this if none of the BirdNET-detected species are "
+                    "actually present"
+                ),
             )
 
             if none_of_above:
-                selected_species = ["NONE_DETECTED"]
+                selected_species.append("NONE_DETECTED")
+
+            no_bird_audible = st.checkbox(
+                "🕊️ No bird species audible",
+                key=f"review_no_bird_{fk}",
+                help=(
+                    "Check this if no bird of any kind is audible in this "
+                    "clip at all"
+                ),
+            )
+
+            if no_bird_audible:
+                selected_species.append(NO_BIRD_AUDIBLE)
 
             # Additional species not detected by BirdNET
             already_shown = set(scientific_to_display.values())
@@ -451,6 +499,7 @@ def _render_cross_validation_form(record, selections):
                 submit_label,
                 type="primary",
                 use_container_width=True,
+                shortcut="Enter",
             )
 
             if submitted:
@@ -505,42 +554,32 @@ def _handle_cross_validation_submission(
     is_update=False,
 ):
     """Handle cross-validation or update form submission."""
-    if not user_confidence:
-        st.error("Please rate your confidence before submitting.")
+    # Collect the FP fragment's widget values once (the block lives outside
+    # the form).
+    fp_values = _collect_fp_widget_values(
+        "xfp", st.session_state.get("review_form_key", 0)
+    )
+
+    # Confidence gating (user feedback): block only if NEITHER the
+    # annotation confidence NOR the FP certainty is selected.
+    if not user_confidence and not fp_values.get("fp_certainty"):
+        st.error(
+            "Please rate your confidence in the annotation above, or the "
+            "certainty of the False-Positive assessment."
+        )
         return
 
     # Parse extra species and merge (format: "Common Name (Scientific Name)" or plain scientific)
     if extra_species_raw and "NONE_DETECTED" not in selected_species:
-        additional_species = [
-            s.split(" (")[-1].rstrip(")")
-            if " (" in s and s.endswith(")")
-            else s
-            for s in extra_species_raw
-        ]
+        additional_species = [_extract_scientific(s) for s in extra_species_raw]
         selected_species = selected_species + additional_species
-
-    from database.queries import get_device_site_map
+    from database.queries import get_site_info_for_deployment
 
     deployment_id = record.get("deployment_id", "")
-    device_site_map = get_device_site_map()
-    site_info = device_site_map.get(deployment_id)
-    if not site_info:
-        device_id = (
-            deployment_id.rsplit("_", 1)[-1] if "_" in deployment_id else deployment_id
-        )
-        site_info = device_site_map.get(device_id, {})
+    site_info = get_site_info_for_deployment(deployment_id)
 
     # Parse BirdNET species/confidences from the record
-    birdnet_species = [
-        s.strip()
-        for s in str(record.get("birdnet_species_detected", "")).split("|")
-        if s.strip()
-    ]
-    birdnet_confidences = [
-        c.strip()
-        for c in str(record.get("birdnet_confidences", "")).split("|")
-        if c.strip()
-    ]
+    birdnet_species, birdnet_confidences, _ = _parse_birdnet_lists(record)
 
     validation_data = {
         "filename": record.get("filename", ""),
@@ -561,7 +600,32 @@ def _handle_cross_validation_submission(
         "timestamp": pd.Timestamp.now(),
         "is_cross_validation": not is_update,
         "is_update": is_update,
+        "is_fp_assessment": False,
     }
+
+    # FP characterization: apply the same consistency rules as the expert
+    # validation form. A FP assessment is only meaningful if at least one
+    # BirdNET detection was NOT confirmed.
+    rejected_species = []
+    for idx, species in enumerate(birdnet_species):
+        if species in selected_species:
+            continue
+        try:
+            conf = (
+                float(birdnet_confidences[idx])
+                if idx < len(birdnet_confidences)
+                else 0.0
+            )
+        except (ValueError, TypeError):
+            conf = 0.0
+        rejected_species.append((species, conf))
+    error, fp_columns = _build_fp_columns(
+        fp_values, rejected_species, bool(birdnet_species)
+    )
+    if error:
+        st.error(error)
+        return
+    validation_data.update(fp_columns)
 
     success = save_pro_validation_response(validation_data)
 

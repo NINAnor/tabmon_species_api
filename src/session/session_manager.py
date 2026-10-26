@@ -40,6 +40,13 @@ def initialize_review_session():
     )
 
 
+def bump_expert_form_key():
+    """Advance the Expert form key so stale widgets reset on rerun."""
+    st.session_state.expert_form_key = (
+        st.session_state.get("expert_form_key", 0) + 1
+    )
+
+
 def clear_pro_clip_state():
     """Clear all Expert mode clip-related state and caches."""
     st.session_state.expert_full_clip_list = None
