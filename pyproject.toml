@@ -21,7 +21,6 @@ dependencies = [
   "pyarrow>=14.0.0",
   "python-dotenv>=1.2.1",
   "streamlit>=1.52.2",
-  "streamlit-shortcuts>=1.2.2",
 ]
 description = ""
 license = "GPL-3.0+"

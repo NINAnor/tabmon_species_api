@@ -63,7 +63,7 @@ def render_pro_help_section():
 - **q / w / e** — Confidence: Low / Moderate / High
 - **a** — Previous clip
 - **d** — Next clip
-- **Enter** — Submit the validation
+- **Space** — Submit the validation
 """)
 
 

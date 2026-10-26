@@ -2,129 +2,101 @@
 
 import json
 
-import streamlit.components.v1 as components
+import streamlit as st
 
 
 def add_form_shortcuts(**shortcuts):
-    """Bind keyboard shortcuts to checkbox and radio widgets.
+    """Bind single-key shortcuts to checkbox, radio, and button widgets.
 
-    The listener is registered once per browser session and its mapping
-    is replaced on every rerun, so removed widget keys cannot shadow the
-    current form's shortcuts.
+    Bindings use stable widget-key PREFIXES (e.g. "species_0_" matches the
+    widget keyed "species_0_7"), resolved at keypress time. The listener
+    therefore keeps working after the form key changes on the next clip,
+    without depending on this script being re-executed. Key presses inside
+    text fields are ignored so typing is never intercepted.
 
     Args:
-        **shortcuts: widget key -> hotkey, list of hotkeys, or radio option
-            descriptors. For example, species_0_4="1" and confidence_4=[
-            {"shortcut": "q", "option": "Low"}, ...].
+        **shortcuts: widget-key prefix -> key, or a descriptor / list of
+            descriptors. For example, species_0_="1", user_confidence_=[
+            {"key": "q", "option": "Low"}, ...], and expert_submit_={
+            "key": " ", "action": "click"}.
     """
-    if not shortcuts:
-        raise ValueError("At least one shortcut binding is required")
-
     js = (
         """<script>
-    const doc = window.parent.document;
-    const parentWindow = window.parent.window;
+    (function() {
     const shortcuts = """
         + json.dumps(shortcuts)
         + """;
+    const shortcutsVersion = 8;
 
-    if (!doc) throw new Error('Not running in Streamlit context');
-
-    const shortcutsVersion = 2;
-    if (parentWindow.__formShortcutsInitialized &&
-        parentWindow.__formShortcutsVersion !== shortcutsVersion) {
-        doc.removeEventListener(
-            'keydown', parentWindow.__formShortcutsListener
-        );
-        parentWindow.__formShortcutsInitialized = false;
+    if (window.__formShortcutsInitialized &&
+        window.__formShortcutsVersion !== shortcutsVersion) {
+        document.removeEventListener('keydown', window.__formShortcutsListener);
+        window.__formShortcutsInitialized = false;
     }
 
-    if (!parentWindow.__formShortcutsInitialized) {
-        parentWindow.__formShortcutsMap = {};
-        parentWindow.__formShortcutsListener = function(e) {
+    function findWidget(prefix) {
+        const pattern = new RegExp('^st-key-' + prefix + '\\\\d+$');
+        const matches = Array.from(
+            document.querySelectorAll('[class*="st-key-' + prefix + '"]')
+        ).filter(element =>
+            Array.from(element.classList).some(name => pattern.test(name))
+        );
+        return matches.length ? matches[matches.length - 1] : null;
+    }
+
+    function findTarget(root, definition) {
+        if (definition.action === 'click') {
+            return root.querySelector('button');
+        }
+        if (definition.option !== undefined) {
+            return Array.from(root.querySelectorAll('label')).find(
+                label => label.querySelector('input[type="radio"]') &&
+                    label.innerText.trim() === definition.option
+            ) || null;
+        }
+        return root.querySelector('input[type="checkbox"]');
+    }
+
+    if (!window.__formShortcutsInitialized) {
+        window.__formShortcutsMap = {};
+        window.__formShortcutsListener = function(e) {
+            if (e.ctrlKey || e.altKey || e.metaKey) {
+                return;
+            }
             if (e.target && e.target.closest && e.target.closest(
                 'input:not([type="checkbox"]):not([type="radio"]), ' +
                 'select, textarea, [contenteditable="true"]'
             )) {
                 return;
             }
-            const allShortcuts = parentWindow.__formShortcutsMap || {};
-            for (const [key, shortcutDefinitions] of Object.entries(allShortcuts)) {
-                const definitions = Array.isArray(shortcutDefinitions)
-                    ? shortcutDefinitions
-                    : [shortcutDefinitions];
-                for (const definition of definitions) {
-                    const shortcut = typeof definition === 'string'
-                        ? definition
-                        : definition.shortcut;
-                    const parts = shortcut.toLowerCase().split('+');
-                    const hasCtrl = parts.includes('ctrl');
-                    const hasAlt = parts.includes('alt');
-                    const hasShift = parts.includes('shift');
-                    const hasMeta = parts.includes('meta') || parts.includes('cmd');
-                    const mainKey = parts.find(
-                        p => !['ctrl', 'alt', 'shift', 'meta', 'cmd'].includes(p)
-                    );
-
-                    if (hasCtrl === e.ctrlKey &&
-                        hasAlt === e.altKey &&
-                        hasShift === e.shiftKey &&
-                        hasMeta === e.metaKey &&
-                        e.key.toLowerCase() === mainKey) {
-
-                        const root = doc.querySelector(`.st-key-${CSS.escape(key)}`);
-                        if (!root) {
-                            continue;
-                        }
-
-                        let el;
-                        if (definition.option !== undefined) {
-                            const labels = Array.from(root.querySelectorAll('label'));
-                            el = labels.find(label => {
-                                const radio = label.querySelector(
-                                    'input[type="radio"]'
-                                );
-                                return (
-                                    radio &&
-                                    label.innerText.trim() === definition.option
-                                );
-                            });
-                            if (!el) {
-                                const options = Array.from(
-                                    root.querySelectorAll('[role="radio"]')
-                                );
-                                el = options.find(option => {
-                                    const label = (
-                                        option.getAttribute('aria-label') ||
-                                        option.innerText ||
-                                        option.textContent || ''
-                                    ).trim();
-                                    return label === definition.option;
-                                });
-                            }
-                        } else {
-                            el = root.querySelector('input[type="checkbox"]') ||
-                                 root.querySelector('[role="checkbox"]');
-                        }
-
-                        if (!el) {
-                            continue;
-                        }
-                        e.preventDefault();
-                        el.click();
-                        if (el.focus) el.focus();
-                        return;
+            const pressed = (e.key || '').toLowerCase();
+            for (const [prefix, entry] of Object.entries(window.__formShortcutsMap)) {
+                for (const binding of [].concat(entry)) {
+                    const definition = typeof binding === 'string'
+                        ? {key: binding}
+                        : binding;
+                    if (definition.key !== pressed) {
+                        continue;
                     }
+                    const root = findWidget(prefix);
+                    const target = root && findTarget(root, definition);
+                    if (!target) {
+                        continue;
+                    }
+                    e.preventDefault();
+                    target.click();
+                    return;
                 }
             }
         };
-        doc.addEventListener('keydown', parentWindow.__formShortcutsListener);
-        parentWindow.__formShortcutsInitialized = true;
-        parentWindow.__formShortcutsVersion = shortcutsVersion;
+        document.addEventListener('keydown', window.__formShortcutsListener);
+        window.__formShortcutsInitialized = true;
+        window.__formShortcutsVersion = shortcutsVersion;
     }
 
-    parentWindow.__formShortcutsMap = shortcuts;
+    Object.assign(window.__formShortcutsMap, shortcuts);
+    })();
     </script>"""
     )
 
-    components.html(js, height=0, width=0)
+    st.html(js, unsafe_allow_javascript=True)

@@ -139,18 +139,12 @@ def _scientific_to_display_option(scientific_name, language_code, all_species):
     return candidate if candidate in all_species else None
 
 
-_FP_CURSOR_HELP = (
-    "CTE placeholder — replaced below when the functions are defined."
-)
-
-
-def render_fp_characterization_fragment(prefix, fk, all_species, last_fp):
+def render_fp_characterization(prefix, fk, all_species, last_fp):
     """False-Positive characterization block, rendered OUTSIDE the form.
 
-    Wrapped in @st.fragment so toggling the main checkbox reruns only this
-    block (instant open/close of the FP fields, no full-page rerun, audio
-    keeps playing). Widget values are collected at submit time via
-    `_collect_fp_widget_values`.
+    Living outside the form lets the assessment checkbox open the FP fields
+    immediately (widgets inside a form only update on submit). Widget
+    values are collected at submit time via `_collect_fp_widget_values`.
 
     Args:
         prefix: Key prefix ("fp" in the validation form, "xfp" in review).
@@ -266,7 +260,7 @@ def render_fp_characterization_fragment(prefix, fk, all_species, last_fp):
 def _collect_fp_widget_values(prefix, fk):
     """Read the current FP characterization widget values from session state.
 
-    Complements `render_fp_characterization_fragment`, which lives outside
+    Complements `render_fp_characterization`, which lives outside
     the form — its widgets can't be passed as form values, so the submit
     handler reads them here. Species/other-bird detail are only read when
     their parent source checkbox is ticked (the widget may not exist
@@ -566,14 +560,25 @@ def render_pro_validation_form(result, selections):
         )
         last_fp = last_fields.get("fp_form_data") or {}
 
-        # Clip-level False-Positive characterization — rendered ABOVE the
-        # form inside a fragment so that ticking the assessment checkbox
-        # instantly opens the FP fields (rerunning only the fragment, without
-        # a page reload or audio restart). Applies to the BirdNET-detected
-        # species that were rejected (left unchecked, or covered by 'None of
-        # the listed species are present').
-        render_fp_characterization_fragment(
+        # Clip-level False-Positive characterization, rendered ABOVE the
+        # form so the assessment checkbox opens the FP fields immediately.
+        # Applies to the BirdNET-detected species that were rejected (left
+        # unchecked, or covered by 'None of the listed species are present').
+        render_fp_characterization(
             "fp", fk, all_species_for_prefill, last_fp
+        )
+
+        add_form_shortcuts(
+            species_0_="1",
+            none_of_above_="2",
+            no_bird_audible_="3",
+            unidentified_bird_="4",
+            user_confidence_=[
+                {"key": "q", "option": "Low"},
+                {"key": "w", "option": "Moderate"},
+                {"key": "e", "option": "High"},
+            ],
+            expert_submit_={"key": " ", "action": "click"},
         )
 
         with st.form(f"expert_validation_form_{fk}"):
@@ -718,19 +723,6 @@ def render_pro_validation_form(result, selections):
                 ),
             )
 
-            shortcut_bindings = {}
-            if len(species_data) >= 1:
-                shortcut_bindings[f"species_0_{fk}"] = "1"
-            shortcut_bindings[f"none_of_above_{fk}"] = "2"
-            shortcut_bindings[f"no_bird_audible_{fk}"] = "3"
-            shortcut_bindings[f"unidentified_bird_{fk}"] = "4"
-            shortcut_bindings[f"user_confidence_{fk}"] = [
-                {"shortcut": "q", "option": "Low"},
-                {"shortcut": "w", "option": "Moderate"},
-                {"shortcut": "e", "option": "High"},
-            ]
-            add_form_shortcuts(**shortcut_bindings)
-
             st.markdown("---")
 
             # Notes/comments field — plain checkbox grid (no dropdown/popover)
@@ -794,7 +786,7 @@ def render_pro_validation_form(result, selections):
                 "✅ Submit Validation",
                 type="primary",
                 use_container_width=True,
-                shortcut="Enter",
+                key=f"expert_submit_{fk}",
             )
 
             if submitted:
@@ -815,7 +807,6 @@ def render_pro_validation_form(result, selections):
                     existing_record is not None,
                 )
 
-
 def _handle_pro_validation_submission(
     result,
     selections,
@@ -833,32 +824,34 @@ def _handle_pro_validation_submission(
     has_existing_record=False,
 ):
     """Handle Expert mode validation form submission."""
-    # Confidence gating (user feedback): the submission is blocked only if
-    # NEITHER the annotation confidence NOR the FP block's certainty is
-    # selected — either one is sufficient. If only the FP certainty was
-    # chosen, user_confidence stays blank in the CSV (the two are distinct
-    # and are never blended).
-    fp_certainty = (fp_values or {}).get("fp_certainty")
-    if not user_confidence and not fp_certainty:
-        st.error(
-            "Please rate your confidence in the annotation above, or the "
-            "certainty of the False-Positive assessment."
-        )
-        return
-
-    # --- Primary identification: relaxed on purpose (user feedback) ---
-    # Confidence is the only hard requirement. A submission is valid if it
-    # carries at least one piece of annotation information: confirmed
-    # species, "None of the listed species are present", "No bird species
-    # audible", "Unidentified bird present", additional non-BirdNET
-    # species, or a False-Positive assessment. Only genuinely contradictory
-    # input is blocked.
     has_species = bool(species_only_selected)
     has_none = bool(none_of_above)
     has_silence = bool(no_bird_audible)
     has_unidentified = bool(unidentified_bird)
     has_other = bool(other_species_list)
     fp_assessment = bool((fp_values or {}).get("assessment"))
+
+    # A submission with nothing selected is valid: it is saved with an empty
+    # identified_species (no focal species confirmed) and no confidence.
+    # Otherwise, confidence or the FP block's certainty is required; if only
+    # the FP certainty was chosen, user_confidence stays blank in the CSV.
+    is_empty_submission = not any(
+        [
+            has_species,
+            has_none,
+            has_silence,
+            has_unidentified,
+            has_other,
+            fp_assessment,
+        ]
+    )
+    fp_certainty = (fp_values or {}).get("fp_certainty")
+    if not is_empty_submission and not user_confidence and not fp_certainty:
+        st.error(
+            "Please rate your confidence in the annotation above, or the "
+            "certainty of the False-Positive assessment."
+        )
+        return
 
     if has_none and has_species:
         st.error(
@@ -873,24 +866,6 @@ def _handle_pro_validation_submission(
             "Contradictory annotation: 'No bird species audible' means no "
             "bird of any kind is audible, but you also marked birds above. "
             "Untick the contradictory options."
-        )
-        return
-
-    if not any(
-        [
-            has_species,
-            has_none,
-            has_silence,
-            has_unidentified,
-            has_other,
-            fp_assessment,
-        ]
-    ):
-        st.error(
-            "Please annotate this clip: mark which species you hear, check "
-            "'None of the listed species are present', 'No bird species "
-            "audible' or 'Unidentified bird present', add species not "
-            "listed above, or tick the False-Positive assessment box."
         )
         return
 
@@ -920,8 +895,8 @@ def _handle_pro_validation_submission(
         st.error(error)
         return
 
-    # Extract scientific names from multiselect
-    # Format: "Common Name (Scientific Name)"
+    # Multiselect options are "Common Name (Scientific Name)"; keep the
+    # scientific name only.
     additional_species = [_extract_scientific(s) for s in other_species_list]
 
     all_identified_species = selected_species + additional_species

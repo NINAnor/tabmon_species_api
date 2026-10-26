@@ -12,7 +12,7 @@ from handlers.validation_handlers import (
     _extract_scientific,
     _get_all_species_list,
     _parse_validation_record_for_prefill,
-    render_fp_characterization_fragment,
+    render_fp_characterization,
 )
 from ui.ui_shortcuts import add_form_shortcuts
 from ui.ui_utils import (
@@ -363,11 +363,10 @@ def _render_cross_validation_form(record, selections):
             original_user_id == current_user_id
         )
 
-        # FP characterization — rendered ABOVE the form inside a fragment so
-        # the assessment checkbox instantly opens the FP fields (no page
-        # rerun beyond the fragment itself). Pre-filled from the record when
-        # the reviewer is the original annotator (update mode). Values are
-        # collected from session state at submit time.
+        # FP characterization, rendered ABOVE the form so the assessment
+        # checkbox opens the FP fields immediately. Pre-filled from the
+        # record when the reviewer is the original annotator (update mode).
+        # Values are collected from session state at submit time.
         review_all_species = _get_all_species_list(language_code)
         last_fp = {}
         parsed_own = {}
@@ -376,7 +375,20 @@ def _render_cross_validation_form(record, selections):
                 record, language_code, review_all_species
             )
             last_fp = parsed_own.get("fp_form_data") or {}
-        render_fp_characterization_fragment("xfp", fk, review_all_species, last_fp)
+        render_fp_characterization("xfp", fk, review_all_species, last_fp)
+
+        add_form_shortcuts(
+            review_species_0_="1",
+            review_none_="2",
+            review_no_bird_="3",
+            review_unidentified_="4",
+            review_confidence_=[
+                {"key": "q", "option": "Low"},
+                {"key": "w", "option": "Moderate"},
+                {"key": "e", "option": "High"},
+            ],
+            review_submit_={"key": " ", "action": "click"},
+        )
 
         with st.form(f"cross_validation_form_{fk}"):
             if is_update_mode:
@@ -493,19 +505,6 @@ def _render_cross_validation_form(record, selections):
                 horizontal=True,
                 key=f"review_confidence_{fk}",
             )
-            shortcut_bindings = {
-                f"review_none_{fk}": "2",
-                f"review_no_bird_{fk}": "3",
-                f"review_unidentified_{fk}": "4",
-                f"review_confidence_{fk}": [
-                    {"shortcut": "q", "option": "Low"},
-                    {"shortcut": "w", "option": "Moderate"},
-                    {"shortcut": "e", "option": "High"},
-                ],
-            }
-            if species_list:
-                shortcut_bindings[f"review_species_0_{fk}"] = "1"
-            add_form_shortcuts(**shortcut_bindings)
 
             st.markdown("---")
 
@@ -525,7 +524,7 @@ def _render_cross_validation_form(record, selections):
                 submit_label,
                 type="primary",
                 use_container_width=True,
-                shortcut="Enter",
+                key=f"review_submit_{fk}",
             )
 
             if submitted:
@@ -580,15 +579,24 @@ def _handle_cross_validation_submission(
     is_update=False,
 ):
     """Handle cross-validation or update form submission."""
-    # Collect the FP fragment's widget values once (the block lives outside
+    # Collect the FP block's widget values once (the block lives outside
     # the form).
     fp_values = _collect_fp_widget_values(
         "xfp", st.session_state.get("review_form_key", 0)
     )
 
-    # Confidence gating (user feedback): block only if NEITHER the
-    # annotation confidence NOR the FP certainty is selected.
-    if not user_confidence and not fp_values.get("fp_certainty"):
+    # A submission with nothing selected is valid and saved with an empty
+    # identified_species. Otherwise, confidence or FP certainty is required.
+    is_empty_submission = (
+        not selected_species
+        and not extra_species_raw
+        and not fp_values.get("assessment")
+    )
+    if (
+        not is_empty_submission
+        and not user_confidence
+        and not fp_values.get("fp_certainty")
+    ):
         st.error(
             "Please rate your confidence in the annotation above, or the "
             "certainty of the False-Positive assessment."
@@ -623,7 +631,7 @@ def _handle_cross_validation_submission(
         )
         return
 
-    # Parse extra species and merge (format: "Common Name (Scientific Name)" or plain scientific)
+    # Parse extra species and merge (Common Name (Scientific) or plain name)
     if extra_species_raw and "NONE_DETECTED" not in selected_species:
         additional_species = [_extract_scientific(s) for s in extra_species_raw]
         selected_species = selected_species + additional_species
@@ -633,15 +641,17 @@ def _handle_cross_validation_submission(
     site_info = get_site_info_for_deployment(deployment_id)
 
     # Parse BirdNET species/confidences from the record
-    birdnet_species, birdnet_confidences, _ = _parse_birdnet_lists(record)
+    birdnet_species, birdnet_confidences, birdnet_species_data = (
+        _parse_birdnet_lists(record)
+    )
 
     validation_data = {
         "filename": record.get("filename", ""),
         "userID": selections["user_id"],
         "deployment_id": deployment_id,
-        "country": site_info.get("country", "") if isinstance(site_info, dict) else "",
-        "site_name": site_info.get("site", "") if isinstance(site_info, dict) else "",
-        "cluster": site_info.get("cluster", "") if isinstance(site_info, dict) else "",
+        "country": site_info.get("country", ""),
+        "site_name": site_info.get("site", ""),
+        "cluster": site_info.get("cluster", ""),
         "birdnet_species_detected": birdnet_species,
         "birdnet_confidences": birdnet_confidences,
         "start_time": record.get("start_time", 0),
@@ -660,19 +670,11 @@ def _handle_cross_validation_submission(
     # FP characterization: apply the same consistency rules as the expert
     # validation form. A FP assessment is only meaningful if at least one
     # BirdNET detection was NOT confirmed.
-    rejected_species = []
-    for idx, species in enumerate(birdnet_species):
-        if species in selected_species:
-            continue
-        try:
-            conf = (
-                float(birdnet_confidences[idx])
-                if idx < len(birdnet_confidences)
-                else 0.0
-            )
-        except (ValueError, TypeError):
-            conf = 0.0
-        rejected_species.append((species, conf))
+    rejected_species = [
+        (species, confidence)
+        for species, confidence in birdnet_species_data
+        if species not in selected_species
+    ]
     error, fp_columns = _build_fp_columns(
         fp_values, rejected_species, bool(birdnet_species)
     )
