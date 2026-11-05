@@ -2,7 +2,8 @@
 
 import streamlit as st
 
-from database.review_queries import (
+from core.species import SCIENTIFIC_NAME, get_species_display_names
+from expert.review_queries import (
     get_available_validators,
     get_filtered_validations,
     load_dataset_validations,
@@ -18,7 +19,10 @@ def render_review_filters(dataset_path, language_code):
 
     Returns True if filters are applied and results are available.
     """
-    with st.expander("🔍 **Review Filters** — Search previously validated clips", expanded=st.session_state.review_results is None):
+    with st.expander(
+        "🔍 **Review Filters** — Search previously validated clips",
+        expanded=st.session_state.review_results is None,
+    ):
         # Load validations to determine available filter options
         validations_df = load_dataset_validations(dataset_path)
 
@@ -38,7 +42,13 @@ def render_review_filters(dataset_path, language_code):
             min_date = validations_df["recording_date"].min()
             max_date = validations_df["recording_date"].max()
 
-            if min_date is not None and max_date is not None and not (hasattr(min_date, "year") and min_date != min_date):
+            has_date_bounds = (
+                min_date is not None
+                and max_date is not None
+                and hasattr(min_date, "year")
+                and min_date == min_date
+            )
+            if has_date_bounds:
                 date_range = st.date_input(
                     "🗓️ Date range",
                     value=(min_date, max_date),
@@ -92,9 +102,7 @@ def render_review_filters(dataset_path, language_code):
 
             species_options = sorted(all_species_in_validations)
 
-            if language_code != "Scientific_Name":
-                from utils import get_species_display_names
-
+            if language_code != SCIENTIFIC_NAME:
                 display_map = get_species_display_names(species_options, language_code)
                 display_to_scientific = display_map
                 display_options = sorted(display_map.keys())
@@ -130,7 +138,8 @@ def render_review_filters(dataset_path, language_code):
                 index=0,
                 horizontal=True,
                 help=(
-                    "True Positive: at least one BirdNET-detected species confirmed by the annotator. "
+                    "True Positive: at least one BirdNET-detected species "
+                    "confirmed by the annotator. "
                     "False Positive: no detected species confirmed (includes NONE). "
                     "Applies to original annotations only."
                 ),

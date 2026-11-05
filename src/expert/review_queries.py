@@ -1,108 +1,52 @@
 """Review mode queries - load and filter previously validated clips."""
 
-import tempfile
-from pathlib import Path
+import re
 
-import boto3
 import pandas as pd
 import streamlit as st
-from botocore.client import Config
 
-from config import (
-    EXPERT_VALIDATIONS_PREFIX,
-    S3_ACCESS_KEY_ID,
-    S3_BUCKET,
-    S3_ENDPOINT,
-    S3_SECRET_ACCESS_KEY,
-)
+from expert.queries import read_dataset_validations
+
+
+def _extract_recording_date(filepath):
+    """Recording date parsed from a file name like ...2025-02-09T01_54_51.065Z..."""
+    match = re.search(r"(\d{4}-\d{2}-\d{2})T", str(filepath))
+    return pd.to_datetime(match.group(1)) if match else pd.NaT
+
+
+def _parse_max_confidence(confidences):
+    """Max BirdNET confidence from a pipe-separated string."""
+    try:
+        if pd.isna(confidences) or confidences == "":
+            return 0.0
+        values = [float(x) for x in str(confidences).split("|") if x.strip()]
+        return max(values) if values else 0.0
+    except (ValueError, TypeError):
+        return 0.0
 
 
 @st.cache_data(ttl=300, show_spinner="Loading validations...")
 def load_dataset_validations(dataset_path):
-    """Load all validation records for a dataset from S3.
-
-    Reads all CSV files matching the dataset name from the validations_expert/ folder.
-    Parses recording month from filename and computes max BirdNET confidence.
-
-    Returns a DataFrame with all validation records plus derived columns.
-    """
-    import re
-
-    dataset_name = (
-        dataset_path.split("/")[-1].replace(".parquet", "") if dataset_path else ""
-    )
-
-    s3_client = boto3.client(
-        "s3",
-        endpoint_url=f"https://{S3_ENDPOINT}",
-        aws_access_key_id=S3_ACCESS_KEY_ID,
-        aws_secret_access_key=S3_SECRET_ACCESS_KEY,
-        config=Config(signature_version="s3v4"),
-    )
-
+    """Load all validation records for a dataset, plus derived columns
+    (recording date/month and max BirdNET confidence)."""
     try:
-        response = s3_client.list_objects_v2(
-            Bucket=S3_BUCKET, Prefix=EXPERT_VALIDATIONS_PREFIX
-        )
-        if "Contents" not in response:
-            return pd.DataFrame()
-
-        all_validations = []
-        for obj in response["Contents"]:
-            filename = obj["Key"].split("/")[-1]
-            if obj["Key"].endswith(".csv") and filename.startswith(f"{dataset_name}_"):
-                try:
-                    with tempfile.NamedTemporaryFile(
-                        mode="w+", suffix=".csv", delete=False
-                    ) as temp_file:
-                        try:
-                            s3_client.download_file(
-                                S3_BUCKET, obj["Key"], temp_file.name
-                            )
-                            df = pd.read_csv(temp_file.name)
-                            all_validations.append(df)
-                        finally:
-                            Path(temp_file.name).unlink()
-                except Exception:
-                    continue
-
-        if not all_validations:
-            return pd.DataFrame()
-
-        combined_df = pd.concat(all_validations, ignore_index=True)
-
-        # Parse recording date and month from the filename field
-        def extract_date(filepath):
-            match = re.search(r"(\d{4}-\d{2}-\d{2})T", str(filepath))
-            if match:
-                return pd.to_datetime(match.group(1))
-            return pd.NaT
-
-        combined_df["recording_date"] = combined_df["filename"].apply(extract_date)
-        combined_df["recording_month"] = combined_df["recording_date"].dt.month
-
-        # Compute max BirdNET confidence from pipe-separated string
-        def parse_max_confidence(conf_str):
-            try:
-                if pd.isna(conf_str) or conf_str == "":
-                    return 0.0
-                values = [float(x) for x in str(conf_str).split("|") if x.strip()]
-                return max(values) if values else 0.0
-            except (ValueError, TypeError):
-                return 0.0
-
-        combined_df["max_birdnet_confidence"] = combined_df[
-            "birdnet_confidences"
-        ].apply(parse_max_confidence)
-
-        # Ensure user_comments is string
-        combined_df["user_comments"] = combined_df["user_comments"].fillna("")
-
-        return combined_df
-
+        validations = read_dataset_validations(dataset_path)
     except Exception as e:
         st.error(f"Error loading validations: {e}")
         return pd.DataFrame()
+
+    if validations.empty:
+        return validations
+
+    validations["recording_date"] = validations["filename"].apply(
+        _extract_recording_date
+    )
+    validations["recording_month"] = validations["recording_date"].dt.month
+    validations["max_birdnet_confidence"] = validations["birdnet_confidences"].apply(
+        _parse_max_confidence
+    )
+    validations["user_comments"] = validations["user_comments"].fillna("")
+    return validations
 
 
 def get_filtered_validations(dataset_path, filters):
@@ -156,13 +100,12 @@ def get_filtered_validations(dataset_path, filters):
 
     comment_search = filters.get("comment_search", "").strip()
     if comment_search:
-        df = df[
-            df["user_comments"].str.contains(comment_search, case=False, na=False)
-        ]
+        df = df[df["user_comments"].str.contains(comment_search, case=False, na=False)]
 
     # Filter by species (in birdnet_species_detected or identified_species)
     species_filter = filters.get("species")
     if species_filter:
+
         def contains_species(row):
             detected = str(row.get("birdnet_species_detected", ""))
             identified = str(row.get("identified_species", ""))

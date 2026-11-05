@@ -3,8 +3,12 @@
 set -o errexit
 set -o pipefail
 
-# Create local data directory for validation responses
-mkdir -p /app/data
+# APP selects which app to run: "expert" (default) or "citizen"
+APP="${APP:-expert}"
 
-# Start your API application
-exec uv run streamlit run src/dashboard.py
+case "$APP" in
+  expert|citizen) ;;
+  *) echo "Unknown APP '$APP' (expected 'expert' or 'citizen')" >&2; exit 1 ;;
+esac
+
+exec uv run streamlit run "src/${APP}_app.py"

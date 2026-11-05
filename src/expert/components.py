@@ -1,16 +1,23 @@
 """Expert Mode UI Components."""
 
-import os
-
 import streamlit as st
 
-from session.session_manager import bump_expert_form_key
-from ui.ui_utils import (
-    render_all_validated_message,
+from core.audio import (
+    extract_clip,
+    format_detection_time,
+    generate_spectrogram,
     render_audio_player,
-    render_clip_metadata,
     render_spectrogram,
 )
+from core.sites import get_site_info_for_deployment
+from core.ui import render_context_slider
+from expert.queries import (
+    get_audio_url,
+    get_first_unannotated_index,
+    get_remaining_clips_count,
+    get_user_validation_records,
+)
+from expert.session import bump_expert_form_key
 
 
 def render_pro_page_header():
@@ -67,6 +74,23 @@ def render_pro_help_section():
 """)
 
 
+def render_clip_metadata(clip):
+    """Render clip metadata: site, cluster and detection time."""
+    filename = clip.get("filename", "").split("/")[-1]
+    deployment_id = clip.get("deployment_id", "")
+    start_time = clip.get("start_time")
+
+    detection_time = format_detection_time(filename, start_time)
+
+    if deployment_id:
+        site_info = get_site_info_for_deployment(deployment_id)
+        st.markdown(f"**📍 Site:** `{site_info.get('site', deployment_id)}`")
+        if site_info.get("cluster"):
+            st.markdown(f"**🏘️ Cluster:** `{site_info['cluster']}`")
+    if detection_time:
+        st.markdown(f"**🔊 Detection time:** `{detection_time}`")
+
+
 def render_pro_clip_section(result, selections):
     """
     Render the Expert mode audio clip section.
@@ -78,8 +102,6 @@ def render_pro_clip_section(result, selections):
     Returns:
         bool: True if clip was loaded successfully, False otherwise
     """
-    from utils import extract_clip
-
     if not result:
         st.warning(f"No clips assigned for user {selections['user_id']}")
         return False
@@ -94,76 +116,55 @@ def render_pro_clip_section(result, selections):
                 st.session_state.expert_clip_index = index + 1
                 bump_expert_form_key()
                 st.rerun()
-        render_all_validated_message(
-            mode_name="assigned clips",
-            total_clips=result.get("total_clips", 0),
-            extra_message=(
-                "Your annotation work is complete. Thank you for your contribution!"
-            ),
+        st.success(
+            f"🎉 Congratulations! All {result.get('total_clips', 0)} assigned clips "
+            "have been validated!"
         )
+        st.info("✅ Your annotation work is complete. Thank you for your contribution!")
+        st.balloons()
         return False
 
     with st.container(border=True):
         st.markdown("### 🎵 Audio Clip")
 
-        filepath = result["filename"].replace("bugg_RpiID", "bugg_RPiID")
-        full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
-
-        context_seconds = st.slider(
-            "Context around detection (s)",
-            min_value=1,
-            max_value=5,
-            value=1,
-            step=1,
-            key="context_seconds",
-            help="Seconds of audio context before and after the 3-second BirdNET detection window.",
-        )
-
-        clip = extract_clip(full_path, result["start_time"], context_seconds=context_seconds)
+        audio_url = get_audio_url(result["filename"])
+        context_seconds = render_context_slider("context_seconds")
+        clip = extract_clip(audio_url, result["start_time"], context_seconds)
 
         render_clip_metadata(result)
         render_audio_player(clip)
-        render_spectrogram(full_path, result["start_time"], expanded=True, context_seconds=context_seconds)
+        with st.expander("📊 Spectrogram", expanded=True):
+            render_spectrogram(audio_url, result["start_time"], context_seconds)
 
         render_pro_navigation_buttons(selections)
 
-    # Prefetch the next clip's audio and spectrogram into cache
     _prefetch_next_clip_audio()
 
     return True
 
 
 def _prefetch_next_clip_audio():
-    """Prefetch the next clip's audio and spectrogram into cache."""
-    from ui.ui_utils import _generate_spectrogram_image
-    from utils import extract_clip
-
+    """Warm the audio and spectrogram caches for the next clip."""
     clips = st.session_state.get("expert_full_clip_list") or []
     index = st.session_state.get("expert_clip_index", 0)
-    if clips and index + 1 < len(clips):
-        next_clip = clips[index + 1]
-        if next_clip.get("filename"):
-            filepath = next_clip["filename"].replace("bugg_RpiID", "bugg_RPiID")
-            full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
-            context_seconds = st.session_state.get("context_seconds", 1)
-            # Warm caches for the next clip
-            extract_clip(full_path, next_clip["start_time"], context_seconds=context_seconds)
-            _generate_spectrogram_image(full_path, next_clip["start_time"], context_seconds=context_seconds)
+    if not clips or index + 1 >= len(clips):
+        return
+    next_clip = clips[index + 1]
+    if next_clip.get("filename"):
+        audio_url = get_audio_url(next_clip["filename"])
+        context_seconds = st.session_state.get("context_seconds", 1)
+        extract_clip(audio_url, next_clip["start_time"], context_seconds)
+        generate_spectrogram(audio_url, next_clip["start_time"], context_seconds)
 
 
 def render_pro_navigation_buttons(selections):
-    """Render Previous/Next buttons for true position-based navigation
-    through the user's full assigned-clip list.
+    """Render Previous/Next buttons for position-based navigation through
+    the user's full assigned-clip list.
 
     Both buttons simply move the position index by one; landing on an
-    already-submitted clip pre-fills the form (handled in
-    validation_handlers.py), landing on a fresh/skipped one shows it blank.
+    already-submitted clip pre-fills the form (handled in validation.py),
+    landing on a fresh/skipped one shows it blank.
     """
-    from database.queries import (
-        get_remaining_pro_clips_count,
-        get_user_validation_records,
-    )
-
     clips = st.session_state.get("expert_full_clip_list") or []
     index = st.session_state.get("expert_clip_index", 0)
     total = len(clips)
@@ -196,22 +197,20 @@ def render_pro_navigation_buttons(selections):
     # unannotated (e.g. you navigated past them without submitting), make
     # that visible and offer a quick way back to the first one.
     if clips and index >= total - 1:
-        validation_records = get_user_validation_records(
-            selections["user_id"], selections["dataset_path"]
+        validated_keys = set(
+            get_user_validation_records(
+                selections["user_id"], selections["dataset_path"]
+            )
         )
-        remaining = get_remaining_pro_clips_count(
-            clips, set(validation_records.keys())
-        )
+        remaining = get_remaining_clips_count(clips, validated_keys)
         if remaining > 0:
             st.warning(
                 f"You've reached the end of your list, but **{remaining}** "
                 "earlier clip(s) are still unannotated."
             )
             if st.button("⏮ Jump to First Unannotated Clip"):
-                from database.queries import get_first_unannotated_index
-
                 st.session_state.expert_clip_index = get_first_unannotated_index(
-                    clips, set(validation_records.keys())
+                    clips, validated_keys
                 )
                 bump_expert_form_key()
                 st.rerun()

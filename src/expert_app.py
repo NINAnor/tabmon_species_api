@@ -1,34 +1,30 @@
 """
-TABMON Listening Lab - Expert Mode Application
+TABMON Listening Lab - Expert app.
 
-This is the main entry point for the TABMON Expert Species Validation Tool.
-Expert mode is designed for assigned annotation tasks with user authentication.
+Annotation of assigned clips (user ID login), plus review/cross-validation
+of previous annotations. Used for the TABMON studies.
 """
 
 import streamlit as st
 
-from handlers.review_handlers import render_review_filters
-from handlers.selection_handlers import get_pro_user_selections
-from handlers.validation_handlers import render_pro_validation_form
-from session.session_manager import get_or_load_pro_clip, initialize_pro_session
-from ui.review_components import render_review_clip_section
-from ui.ui_components import (
+from core.ui import setup_page_config
+from expert.components import (
     render_pro_all_validated_placeholder,
     render_pro_clip_section,
     render_pro_empty_validation_placeholder,
     render_pro_help_section,
     render_pro_page_header,
 )
-from ui.ui_utils import setup_page_config
+from expert.review_components import render_review_clip_section
+from expert.review_filters import render_review_filters
+from expert.selection import get_pro_user_selections
+from expert.session import get_or_load_pro_clip, initialize_pro_session
+from expert.validation import render_pro_validation_form
 
 
 def main():
     """Main application entry point for Expert mode."""
-
-    # Setup page configuration
     setup_page_config()
-
-    # Initialize Expert session
     initialize_pro_session()
     render_pro_page_header()
     render_pro_help_section()
@@ -36,7 +32,6 @@ def main():
     # Get user selections (includes authentication)
     selections = get_pro_user_selections()
 
-    # If not authenticated, show placeholder and return
     if selections is None:
         st.markdown("---")
         col1, col2 = st.columns([1, 1])
@@ -48,7 +43,6 @@ def main():
 
     st.markdown("---")
 
-    # Route between Validate and Review modes
     if st.session_state.get("review_mode_active", False):
         _render_review_mode(selections)
     else:
@@ -57,10 +51,8 @@ def main():
 
 def _render_validate_mode(selections):
     """Render the standard validation mode."""
-    # Load clip based on selections
     result = get_or_load_pro_clip(selections)
 
-    # Main content: Audio Clip and Validation side by side
     col1, col2 = st.columns([1, 1])
 
     with col1:
@@ -77,13 +69,9 @@ def _render_validate_mode(selections):
 
 def _render_review_mode(selections):
     """Render the review/cross-checking mode."""
-    # Render filters as an expander on the main page
     has_results = render_review_filters(
-        selections["dataset_path"],
-        selections.get("language_code", "Scientific_Name"),
+        selections["dataset_path"], selections["language_code"]
     )
-
-    # Render review content below filters
     if has_results:
         render_review_clip_section(selections)
 

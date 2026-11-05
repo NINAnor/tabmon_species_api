@@ -6,14 +6,15 @@ species filtering and language selection.
 
 import streamlit as st
 
-from config import EXPERT_DATASETS_FOLDER, LANGUAGE_MAPPING
-from database.queries import (
+from config import EXPERT_DATASETS_PREFIX
+from core.species import get_species_display_names
+from core.storage import s3_url
+from core.ui import render_language_selector, render_sidebar_logo
+from expert.queries import (
     check_user_has_annotations,
     get_species_for_user,
     list_available_datasets,
 )
-from ui.ui_utils import render_sidebar_logo
-from utils import get_species_display_names
 
 
 def render_dataset_selection():
@@ -44,7 +45,7 @@ def render_dataset_selection():
 
     if not datasets:
         st.sidebar.error("❌ No annotation datasets found")
-        st.sidebar.info(f"Looking in: {EXPERT_DATASETS_FOLDER}")
+        st.sidebar.info(f"Looking in: {s3_url(EXPERT_DATASETS_PREFIX)}")
         return False, None
 
     # Display dataset selection
@@ -64,7 +65,7 @@ def render_dataset_selection():
     return False, None
 
 
-def render_pro_authentication():
+def render_pro_authentication(dataset_path):
     """Render authentication form for Expert mode.
     Returns (is_authenticated, user_id).
     """
@@ -99,7 +100,7 @@ def render_pro_authentication():
         user_id = user_id.strip()
 
         # Check if user has any assigned annotations
-        if check_user_has_annotations(user_id):
+        if check_user_has_annotations(user_id, dataset_path):
             st.session_state.expert_authenticated = True
             st.session_state.expert_user_id = user_id
             st.rerun()
@@ -177,7 +178,7 @@ def get_pro_user_selections():
         return None
 
     # Step 2: User authentication
-    is_authenticated, user_id = render_pro_authentication()
+    is_authenticated, user_id = render_pro_authentication(dataset_path)
 
     if not is_authenticated:
         return None
@@ -186,17 +187,7 @@ def get_pro_user_selections():
     st.sidebar.info(f"👤 **User:** {user_id}")
 
     # Step 3: Language selection (before species filter so it affects display)
-    selected_language = st.sidebar.selectbox(
-        "Species Name Language",
-        options=["Scientific Names"] + list(LANGUAGE_MAPPING.keys()),
-        help="Choose the language for species names",
-    )
-
-    language_code = (
-        "Scientific_Name"
-        if selected_language == "Scientific Names"
-        else LANGUAGE_MAPPING[selected_language]
-    )
+    language_code = render_language_selector()
 
     # Step 4: Species filter (optional, uses selected language)
     species_filter = render_species_filter(user_id, dataset_path, language_code)
@@ -224,6 +215,5 @@ def get_pro_user_selections():
         "dataset_path": dataset_path,
         "user_id": user_id,
         "species_filter": species_filter,
-        "confidence_threshold": 0.0,
         "language_code": language_code,
     }

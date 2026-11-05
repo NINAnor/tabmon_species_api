@@ -32,7 +32,7 @@ version = "0.1.0"
 [tool.deptry]
 # Ignore local modules and unused deps
 ignore = ["DEP001", "DEP002"]
-known_first_party = ["config", "utils"]
+known_first_party = ["citizen", "config", "core", "expert"]
 
 [tool.ruff]
 fix = true

@@ -3,13 +3,22 @@
 import pandas as pd
 import streamlit as st
 
-from session.session_manager import bump_expert_form_key
-from ui.ui_shortcuts import add_form_shortcuts
-from utils import (
+from core.shortcuts import add_form_shortcuts
+from core.sites import get_site_info_for_deployment
+from core.species import (
+    SCIENTIFIC_NAME,
+    extract_scientific,
+    get_all_species_list,
     get_species_display_names,
-    load_species_translations,
-    parse_list_cell,
 )
+from expert.queries import (
+    clip_key,
+    get_remaining_clips_count,
+    get_user_validation_records,
+    parse_list_cell,
+    save_validation,
+)
+from expert.session import bump_expert_form_key
 
 # Sentinels written to the identified_species column for "no species"
 # statements. NONE_DETECTED: none of the BirdNET-detected species are
@@ -72,41 +81,6 @@ FP_MECHANISM_OPTIONS = [
 FP_CERTAINTY_OPTIONS = ["Low", "Medium", "High"]
 
 
-@st.cache_data
-def _get_all_species_list(language_code="Scientific_Name"):
-    """Get species names for autocomplete in selected language."""
-    translations_df = load_species_translations()
-
-    if (
-        language_code == "Scientific_Name"
-        or language_code not in translations_df.columns
-    ):
-        return sorted(translations_df["Scientific_Name"].dropna().tolist())
-
-    species_list = [
-        f"{row[language_code]} ({row['Scientific_Name']})"
-        if pd.notna(row.get(language_code))
-        else row["Scientific_Name"]
-        for _, row in translations_df.iterrows()
-    ]
-    return sorted(species_list)
-
-
-def _extract_scientific(display_name):
-    """Parse "Common Name (Scientific Name)" back to the pure scientific name.
-
-    Non-scientific strings (free text like 'lark, sparrow') pass through
-    unchanged.
-    """
-    if (
-        not display_name
-        or " (" not in display_name
-        or not display_name.endswith(")")
-    ):
-        return display_name
-    return display_name.split(" (")[-1].rstrip(")")
-
-
 def _scientific_to_display_option(scientific_name, language_code, all_species):
     """Find the exact option string (matching a selectbox/multiselect's
     `options=all_species`) for a given pure scientific name.
@@ -118,11 +92,11 @@ def _scientific_to_display_option(scientific_name, language_code, all_species):
     """
     if not scientific_name:
         return None
-    if language_code == "Scientific_Name":
+    if language_code == SCIENTIFIC_NAME:
         return scientific_name if scientific_name in all_species else None
 
     # get_species_display_names returns the bare common name as the dict
-    # key (e.g. "Rufous-faced Warbler"), but _get_all_species_list's
+    # key (e.g. "Rufous-faced Warbler"), but get_all_species_list's
     # options are in the combined "Common Name (Scientific Name)" format
     # (falling back to the bare scientific name when no translation
     # exists). Reconstruct the same combined format here so it actually
@@ -381,7 +355,7 @@ def _build_fp_columns(fp_values, rejected_species, has_detections):
     for sig in ticked:
         if sig == FP_SOURCE_SPECIES:
             categories.append("Bird")
-            details.append(_extract_scientific(fp_values.get("fp_species")))
+            details.append(extract_scientific(fp_values.get("fp_species")))
         elif sig == FP_SOURCE_OTHER_BIRD:
             categories.append("Other bird")
             details.append(fp_values.get("fp_other_bird_text", "").strip())
@@ -522,20 +496,15 @@ def render_pro_validation_form(result, selections):
     with st.container(border=True):
         st.markdown("### 🎯 Expert Validation")
 
-        from database.queries import (
-            get_remaining_pro_clips_count,
-            get_user_validation_records,
-        )
-
         clips = st.session_state.get("expert_full_clip_list") or []
         index = st.session_state.get("expert_clip_index", 0)
         validation_records = get_user_validation_records(
             selections["user_id"], selections["dataset_path"]
         )
-        validated_keys = set(validation_records.keys())
+        validated_keys = set(validation_records)
 
         if clips:
-            remaining = get_remaining_pro_clips_count(clips, validated_keys)
+            remaining = get_remaining_clips_count(clips, validated_keys)
             st.info(
                 f"📍 Clip **{index + 1}** of **{len(clips)}** · "
                 f"**{remaining}** still unannotated"
@@ -547,10 +516,9 @@ def render_pro_validation_form(result, selections):
         # here via Previous, Next, or a fresh load), pre-fill every widget
         # below with what was submitted, so you only need to change the one
         # thing you got wrong. Resubmitting appends a new is_update=True row.
-        record_key = (result.get("filename"), result.get("start_time"))
-        existing_record = validation_records.get(record_key)
-        language_code = selections.get("language_code", "Scientific_Name")
-        all_species_for_prefill = _get_all_species_list(language_code)
+        existing_record = validation_records.get(clip_key(result))
+        language_code = selections["language_code"]
+        all_species_for_prefill = get_all_species_list(language_code)
         last_fields = (
             _parse_validation_record_for_prefill(
                 existing_record, language_code, all_species_for_prefill
@@ -897,7 +865,7 @@ def _handle_pro_validation_submission(
 
     # Multiselect options are "Common Name (Scientific Name)"; keep the
     # scientific name only.
-    additional_species = [_extract_scientific(s) for s in other_species_list]
+    additional_species = [extract_scientific(s) for s in other_species_list]
 
     all_identified_species = selected_species + additional_species
 
@@ -906,8 +874,6 @@ def _handle_pro_validation_submission(
     birdnet_confidences = result.get("confidence_array", []) or []
 
     # Look up site metadata from site_info.csv
-    from database.queries import get_site_info_for_deployment
-
     deployment_id = result.get("deployment_id", "")
     site_info = get_site_info_for_deployment(deployment_id)
 
@@ -942,10 +908,7 @@ def _handle_pro_validation_submission(
     # same output file.
     validation_data.update(fp_columns)
 
-    # Save validation response (includes FP characterization columns)
-    from utils import save_pro_validation_response
-
-    save_pro_validation_response(validation_data)
+    save_validation(validation_data)
 
     # Advance to the next clip in the list (clamped to the last index).
     clips = st.session_state.get("expert_full_clip_list") or []

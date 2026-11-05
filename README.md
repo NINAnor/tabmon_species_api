@@ -2,16 +2,33 @@
 
 This repository contains the source code for the TABMON Listening Lab, an interactive web application designed to help users annotate acoustic data collected by the [TABMON project](https://tabmon-eu.nina.no/).
 
-## Features
+## Apps
 
-The application supports **two modes**:
+The repository contains **two apps** that share the same code base (`src/core/`) and configuration (`src/config.py`):
 
-### 🎵 Normal Mode
+### 🐦 Citizen app (`src/citizen_app.py`)
 - Open access for all users
-- Random clip selection and validation
-- Simple Yes/No/Unsure validation
-- Country → Site → Species selection
-- Perfect for crowd-sourced validation
+- Country → Site → Species selection, optional datetime filter
+- Random clip selection from all BirdNET predictions
+- Simple Yes/No/Unsure validation, saved to `validations/`
+
+### 🎓 Expert app (`src/expert_app.py`)
+- Login with an assigned user ID on a selected annotation dataset (`validation_dataset/*.parquet`)
+- Detailed species checklist, vocalization types and False-Positive characterization
+- Review mode to browse and cross-validate previous annotations
+- Annotations saved to `validations_expert/`
+
+### Code layout
+
+```
+src/
+  config.py         shared configuration (S3, paths, audio, languages)
+  core/             shared code: S3/DuckDB access, audio, spectrogram, species names, site info
+  citizen/          citizen app modules
+  expert/           expert app modules
+  citizen_app.py    citizen app entry point
+  expert_app.py     expert app entry point
+```
 
 ## How it works
 
@@ -56,16 +73,22 @@ graph TB
 git clone https://github.com/NINAnor/tabmon_species_api.git
 ```
 
-2. Change the `.env` file and the `src/config.py` to set your S3 credentials and parameters
+2. For local Compose, copy `.env.example` to `.env` and set your S3 credentials. In Portainer, enter `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and `S3_BUCKET` as stack environment variables instead; Compose passes them into both containers. Do not commit credentials.
 
-3. Run the container:
+3. Run both apps:
 
 ```bash
 docker compose up --build -d
 ```
 
+The expert app is served on port `8505` and the citizen app on port `8506`. The container runs the app selected by the `APP` environment variable (`expert` or `citizen`). To run a single app locally:
+
+```bash
+uv run streamlit run src/expert_app.py   # or src/citizen_app.py
+```
+
 > [!WARNING]
-> The `PARQUET_DATASET` and `SITE_INFO_S3_PATH` have a very specific format and you may need to modify the code to fit your own dataset.
+> The prediction parquet files (`PREDICTIONS_S3_PREFIX`), the expert datasets and `SITE_INFO_S3_PATH` have a very specific format and you may need to modify the code to fit your own dataset.
 
 ### Contact
 

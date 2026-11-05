@@ -1,5 +1,15 @@
 x-common-deployment: &default-common-deployment
-  # to be used with "<< : *default-common-deployment"
+  # Both app services share a single built image.
+  image: tabmon-listening-lab:unified
+  build:
+    context: .
+  environment: &common-environment
+    S3_ENDPOINT: ${S3_ENDPOINT:?Set S3_ENDPOINT in Portainer stack environment variables}
+    S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in Portainer stack environment variables}
+    S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in Portainer stack environment variables}
+    S3_BUCKET: ${S3_BUCKET:?Set S3_BUCKET in Portainer stack environment variables}
+    PREDICTIONS_S3_PREFIX: ${PREDICTIONS_S3_PREFIX:-tabmon_predictions/merged_predictions_light}
+    AUDIO_GAIN: ${AUDIO_GAIN:-0.9}
   deploy:
     replicas: 1
     restart_policy:
@@ -8,11 +18,18 @@ x-common-deployment: &default-common-deployment
       max_attempts: 3
 
 services:
-  listening-lab:
+  listening-lab-expert:
     <<: *default-common-deployment
-    build:
-      context: .
-    env_file:
-      - ".env"
+    environment:
+      <<: *common-environment
+      APP: expert
     ports:
       - "8505:8501"
+
+  listening-lab-citizen:
+    <<: *default-common-deployment
+    environment:
+      <<: *common-environment
+      APP: citizen
+    ports:
+      - "8506:8501"

@@ -1,30 +1,27 @@
 """Review Mode UI Components - clip display, navigation, and cross-validation."""
 
-import os
-
 import pandas as pd
 import streamlit as st
 
-from handlers.validation_handlers import (
+from core.audio import extract_clip, render_audio_player, render_spectrogram
+from core.shortcuts import add_form_shortcuts
+from core.sites import get_site_info_for_deployment
+from core.species import (
+    SCIENTIFIC_NAME,
+    extract_scientific,
+    get_all_species_list,
+    get_species_display_names,
+)
+from core.ui import render_context_slider
+from expert.components import render_clip_metadata
+from expert.queries import get_audio_url, parse_list_cell, save_validation
+from expert.review_queries import load_dataset_validations
+from expert.validation import (
     NO_BIRD_AUDIBLE,
     _build_fp_columns,
     _collect_fp_widget_values,
-    _extract_scientific,
-    _get_all_species_list,
     _parse_validation_record_for_prefill,
     render_fp_characterization,
-)
-from ui.ui_shortcuts import add_form_shortcuts
-from ui.ui_utils import (
-    _generate_spectrogram_image,
-    render_audio_player,
-    render_clip_metadata,
-)
-from utils import (
-    extract_clip,
-    get_species_display_names,
-    parse_list_cell,
-    save_pro_validation_response,
 )
 
 
@@ -111,8 +108,7 @@ def _render_audio_and_spectrogram(record):
         st.warning("No audio file path available for this clip.")
         return
 
-    filepath = filename.replace("bugg_RpiID", "bugg_RPiID")
-    full_path = f"s3://{os.getenv('S3_BUCKET')}/{filepath}"
+    audio_url = get_audio_url(filename)
 
     with st.container(border=True):
         st.markdown("### 🎵 Audio & Spectrogram")
@@ -124,28 +120,15 @@ def _render_audio_and_spectrogram(record):
         }
         render_clip_metadata(clip_info)
 
-        context_seconds = st.slider(
-            "Context around detection (s)",
-            min_value=1,
-            max_value=5,
-            value=1,
-            step=1,
-            key="review_context_seconds",
-            help="Seconds of audio context before and after the 3-second BirdNET detection window.",
-        )
-
-        clip = extract_clip(full_path, start_time, context_seconds=context_seconds)
+        context_seconds = render_context_slider("review_context_seconds")
+        clip = extract_clip(audio_url, start_time, context_seconds)
         render_audio_player(clip)
-
-        # Render spectrogram inline (no expander wrapper)
-        img_bytes = _generate_spectrogram_image(full_path, start_time, context_seconds)
-        if img_bytes:
-            st.image(img_bytes, use_container_width=True)
-            st.caption(
-                "🔴 Red lines mark the 3-second BirdNET detection."
-            )
-        else:
-            st.warning("Could not generate spectrogram")
+        render_spectrogram(
+            audio_url,
+            start_time,
+            context_seconds,
+            caption="🔴 Red lines mark the 3-second BirdNET detection.",
+        )
 
 
 def _render_original_validation(record, selections):
@@ -171,7 +154,7 @@ def _render_original_validation(record, selections):
         st.markdown("---")
 
         # Species checklist — show what the original expert selected
-        language_code = selections.get("language_code", "Scientific_Name")
+        language_code = selections["language_code"]
         species_list, _conf_strings, species_data = _parse_birdnet_lists(record)
 
         identified_str = str(record.get("identified_species", ""))
@@ -211,7 +194,7 @@ def _render_original_validation(record, selections):
         if extra_species:
             st.markdown("---")
             st.markdown("**➕ Additional species identified:**")
-            if language_code != "Scientific_Name":
+            if language_code != SCIENTIFIC_NAME:
                 extra_display = get_species_display_names(
                     list(extra_species), language_code
                 )
@@ -302,7 +285,10 @@ def _render_original_validation(record, selections):
         # Cross-validation indicator
         is_cross = record.get("is_cross_validation", False)
         if is_cross:
-            st.warning("🔄 **This record is itself a cross-validation** — it was not produced by the primary annotator.")
+            st.warning(
+                "🔄 **This record is itself a cross-validation** — it was not "
+                "produced by the primary annotator."
+            )
 
 
 def _render_navigation(total_count, current_index):
@@ -352,7 +338,7 @@ def _render_cross_validation_form(record, selections):
         _render_cross_validated_warning(record, selections)
 
         fk = st.session_state.get("review_form_key", 0)
-        language_code = selections.get("language_code", "Scientific_Name")
+        language_code = selections["language_code"]
 
         # Automatically determine update vs. cross-validation from the
         # original annotator's userID vs. the currently logged-in reviewer —
@@ -367,7 +353,7 @@ def _render_cross_validation_form(record, selections):
         # checkbox opens the FP fields immediately. Pre-filled from the
         # record when the reviewer is the original annotator (update mode).
         # Values are collected from session state at submit time.
-        review_all_species = _get_all_species_list(language_code)
+        review_all_species = get_all_species_list(language_code)
         last_fp = {}
         parsed_own = {}
         if is_update_mode:
@@ -434,7 +420,11 @@ def _render_cross_validation_form(record, selections):
                     with col_vocal:
                         prefilled_voc = original_voc_map.get(species, "")
                         voc_options = ["", "Call", "Song"]
-                        voc_default_idx = voc_options.index(prefilled_voc) if is_update_mode and prefilled_voc in voc_options else 0
+                        voc_default_idx = (
+                            voc_options.index(prefilled_voc)
+                            if is_update_mode and prefilled_voc in voc_options
+                            else 0
+                        )
                         vocal_type = st.selectbox(
                             "Type",
                             options=voc_options,
@@ -486,7 +476,7 @@ def _render_cross_validation_form(record, selections):
 
             # Additional species not detected by BirdNET
             already_shown = set(scientific_to_display.values())
-            all_species_options = _get_all_species_list(language_code)
+            all_species_options = get_all_species_list(language_code)
             extra_options = [s for s in all_species_options if s not in already_shown]
             extra_species_raw = st.multiselect(
                 "➕ Add species not in BirdNET list",
@@ -519,7 +509,11 @@ def _render_cross_validation_form(record, selections):
                 key=f"review_comments_{fk}",
             )
 
-            submit_label = "✅ Submit Update" if is_update_mode else "✅ Submit Cross-Validation"
+            submit_label = (
+                "✅ Submit Update"
+                if is_update_mode
+                else "✅ Submit Cross-Validation"
+            )
             submitted = st.form_submit_button(
                 submit_label,
                 type="primary",
@@ -542,8 +536,6 @@ def _render_cross_validation_form(record, selections):
 
 def _render_cross_validated_warning(record, selections):
     """Show a warning if the current user has already cross-validated this clip."""
-    from database.review_queries import load_dataset_validations
-
     dataset_path = selections.get("dataset_path", "")
     user_id = str(selections.get("user_id", ""))
     filename = str(record.get("filename", ""))
@@ -633,9 +625,8 @@ def _handle_cross_validation_submission(
 
     # Parse extra species and merge (Common Name (Scientific) or plain name)
     if extra_species_raw and "NONE_DETECTED" not in selected_species:
-        additional_species = [_extract_scientific(s) for s in extra_species_raw]
+        additional_species = [extract_scientific(s) for s in extra_species_raw]
         selected_species = selected_species + additional_species
-    from database.queries import get_site_info_for_deployment
 
     deployment_id = record.get("deployment_id", "")
     site_info = get_site_info_for_deployment(deployment_id)
@@ -683,11 +674,9 @@ def _handle_cross_validation_submission(
         return
     validation_data.update(fp_columns)
 
-    success = save_pro_validation_response(validation_data)
+    success = save_validation(validation_data)
 
     if success:
-        from database.review_queries import load_dataset_validations
-
         load_dataset_validations.clear()
         # Auto-advance to the next clip
         results_df = st.session_state.review_results
