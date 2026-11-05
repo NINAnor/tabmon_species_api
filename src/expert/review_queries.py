@@ -1,0 +1,181 @@
+"""Review mode queries - load and filter previously validated clips."""
+
+import re
+
+import pandas as pd
+import streamlit as st
+
+from expert.queries import read_dataset_validations
+
+
+def _extract_recording_date(filepath):
+    """Recording date parsed from a file name like ...2025-02-09T01_54_51.065Z..."""
+    match = re.search(r"(\d{4}-\d{2}-\d{2})T", str(filepath))
+    return pd.to_datetime(match.group(1)) if match else pd.NaT
+
+
+def _parse_max_confidence(confidences):
+    """Max BirdNET confidence from a pipe-separated string."""
+    try:
+        if pd.isna(confidences) or confidences == "":
+            return 0.0
+        values = [float(x) for x in str(confidences).split("|") if x.strip()]
+        return max(values) if values else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+@st.cache_data(ttl=300, show_spinner="Loading validations...")
+def load_dataset_validations(dataset_path):
+    """Load all validation records for a dataset, plus derived columns
+    (recording date/month and max BirdNET confidence)."""
+    try:
+        validations = read_dataset_validations(dataset_path)
+    except Exception as e:
+        st.error(f"Error loading validations: {e}")
+        return pd.DataFrame()
+
+    if validations.empty:
+        return validations
+
+    validations["recording_date"] = validations["filename"].apply(
+        _extract_recording_date
+    )
+    validations["recording_month"] = validations["recording_date"].dt.month
+    validations["max_birdnet_confidence"] = validations["birdnet_confidences"].apply(
+        _parse_max_confidence
+    )
+    validations["user_comments"] = validations["user_comments"].fillna("")
+    return validations
+
+
+def get_filtered_validations(dataset_path, filters):
+    """Apply filters to validation records and return matching rows.
+
+    Args:
+        dataset_path: S3 path to the parquet dataset
+        filters: dict with keys:
+            - date_range: tuple (start_date, end_date) or None for all
+            - confidence_range: tuple (min, max) for BirdNET confidence
+            - user_confidence: list of str (Low/Moderate/High) or None for all
+            - has_comments: bool - filter to only records with comments
+            - comment_search: str - search text within comments
+            - species: list of str (scientific names) or None for all
+            - validator: str user ID or None for all
+            - vocalization_type: str ("Call", "Song") or None for all
+
+    Returns filtered DataFrame.
+    """
+    df = load_dataset_validations(dataset_path)
+
+    if df.empty:
+        return df
+
+    # Filter by date range
+    date_range = filters.get("date_range")
+    if date_range:
+        start_date, end_date = date_range
+        df = df[
+            (df["recording_date"] >= pd.to_datetime(start_date))
+            & (df["recording_date"] <= pd.to_datetime(end_date))
+        ]
+
+    # Filter by BirdNET confidence range
+    confidence_range = filters.get("confidence_range")
+    if confidence_range:
+        min_conf, max_conf = confidence_range
+        df = df[
+            (df["max_birdnet_confidence"] >= min_conf)
+            & (df["max_birdnet_confidence"] <= max_conf)
+        ]
+
+    # Filter by expert confidence class
+    user_confidence = filters.get("user_confidence")
+    if user_confidence:
+        df = df[df["user_confidence"].isin(user_confidence)]
+
+    # Filter by comments
+    if filters.get("has_comments"):
+        df = df[df["user_comments"].str.strip() != ""]
+
+    comment_search = filters.get("comment_search", "").strip()
+    if comment_search:
+        df = df[df["user_comments"].str.contains(comment_search, case=False, na=False)]
+
+    # Filter by species (in birdnet_species_detected or identified_species)
+    species_filter = filters.get("species")
+    if species_filter:
+
+        def contains_species(row):
+            detected = str(row.get("birdnet_species_detected", ""))
+            identified = str(row.get("identified_species", ""))
+            combined = f"{detected}|{identified}"
+            return any(sp in combined for sp in species_filter)
+
+        df = df[df.apply(contains_species, axis=1)]
+
+    # Filter by vocalization type (Call/Song)
+    vocalization_type = filters.get("vocalization_type")
+    if vocalization_type:
+        df = df[
+            df["vocalization_types"].str.contains(
+                vocalization_type, case=False, na=False
+            )
+        ]
+
+    # Filter by site name
+    sites = filters.get("sites")
+    if sites:
+        df = df[df["site_name"].astype(str).isin(sites)]
+
+    # Filter by validator
+    validator = filters.get("validator")
+    if validator:
+        df = df[df["userID"].astype(str) == str(validator)]
+
+    # Filter by annotation result (TP/FP) — original annotations only
+    annotation_result = filters.get("annotation_result")
+    if annotation_result:
+        if "is_cross_validation" in df.columns:
+            orig_mask = ~df["is_cross_validation"].fillna(False).astype(bool)
+        else:
+            orig_mask = pd.Series([True] * len(df), index=df.index)
+
+        def _is_tp(row):
+            detected = {
+                s.strip()
+                for s in str(row.get("birdnet_species_detected", "")).split("|")
+                if s.strip()
+            }
+            identified = {
+                s.strip()
+                for s in str(row.get("identified_species", "")).split("|")
+                if s.strip()
+                and s.strip() not in ("NONE_DETECTED", "UNIDENTIFIED_BIRD_PRESENT")
+            }
+            if species_filter:
+                # Scope TP/FP to the selected species only:
+                # TP = the target species was detected AND confirmed by the validator
+                # FP = the target species was detected but NOT confirmed
+                target_detected = detected & set(species_filter)
+                return bool(target_detected & identified)
+            return bool(detected & identified)
+
+        tp_mask = df.apply(_is_tp, axis=1)
+        if annotation_result == "TP":
+            df = df[orig_mask & tp_mask]
+        elif annotation_result == "FP":
+            df = df[orig_mask & ~tp_mask]
+
+    return df.reset_index(drop=True)
+
+
+def get_available_validators(dataset_path):
+    """Get distinct validator user IDs for a dataset.
+
+    Returns sorted list of user ID strings.
+    """
+    df = load_dataset_validations(dataset_path)
+    if df.empty:
+        return []
+    return sorted(df["userID"].astype(str).unique().tolist())

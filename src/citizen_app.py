@@ -1,48 +1,44 @@
 """
-TABMON Listening Lab - Main Dashboard Application
+TABMON Listening Lab - Citizen app.
 
-This is the main entry point for the TABMON Species Validation Tool.
-It orchestrates the UI components, session management, and user interactions.
+Open access: pick a country, site and species, listen to random BirdNET
+detections and confirm or reject them.
 """
 
 import streamlit as st
 
-from selection_handlers import get_user_selections
-from session_manager import get_or_load_clip, initialize_session
-from ui_components import (
+from citizen.components import (
     render_all_validated_placeholder,
     render_clip_section,
     render_empty_validation_placeholder,
     render_help_section,
     render_page_header,
-    setup_page_config,
 )
-from validation_handlers import render_validation_form
+from citizen.selection import get_user_selections
+from citizen.session import (
+    get_or_load_clip,
+    initialize_session,
+    prefetch_next_clip,
+)
+from citizen.validation import render_validation_form
+from core.ui import setup_page_config
 
 
 def main():
-    """Main application entry point."""
-    # Initialize session state
-    initialize_session()
-
-    # Setup page configuration and render header
+    """Main application entry point for Citizen mode."""
     setup_page_config()
+    initialize_session()
     render_page_header()
     render_help_section()
 
-    # Get user selections from sidebar
     selections = get_user_selections()
-
-    # If no selections (e.g., no data for site), stop here
     if not selections:
         return
 
     st.markdown("---")
 
-    # Load clip based on selections
     result = get_or_load_clip(selections)
 
-    # Main content: Audio Clip and Validation side by side
     col1, col2 = st.columns([1, 1])
 
     with col1:
@@ -55,6 +51,10 @@ def main():
             render_all_validated_placeholder()
         else:
             render_empty_validation_placeholder()
+
+    # Runs last so the current clip and form are displayed first.
+    if clip_loaded:
+        prefetch_next_clip(selections)
 
 
 if __name__ == "__main__":

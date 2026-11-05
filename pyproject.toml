@@ -16,8 +16,11 @@ dependencies = [
   "duckdb>=1.4.3",
   "librosa>=0.11.0",
   "matplotlib>=3.7.0",
+  "numpy>=1.24.0",
   "pandas>=2.0.0",
-  "streamlit>=1.52.2"
+  "pyarrow>=14.0.0",
+  "python-dotenv>=1.2.1",
+  "streamlit>=1.52.2",
 ]
 description = ""
 license = "GPL-3.0+"
@@ -26,13 +29,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 version = "0.1.0"
 
-[project.scripts]
-tabmon-species-api = "main:start"
-
 [tool.deptry]
 # Ignore local modules and unused deps
 ignore = ["DEP001", "DEP002"]
-known_first_party = ["config", "queries", "utils"]
+known_first_party = ["citizen", "config", "core", "expert"]
 
 [tool.ruff]
 fix = true
