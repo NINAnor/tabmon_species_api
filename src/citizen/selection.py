@@ -7,7 +7,11 @@ from datetime import datetime
 import streamlit as st
 
 from citizen.queries import get_datetime_bounds_for_site, get_species_for_site
-from core.sites import get_available_countries, get_sites_for_country
+from core.sites import (
+    get_available_countries,
+    get_device_site_map,
+    get_sites_for_country,
+)
 from core.species import get_species_display_names
 from core.ui import render_language_selector, render_sidebar_logo
 
@@ -42,6 +46,52 @@ def _randomize_initial_selection(countries):
     if species:
         common_species = [s for s in COMMON_SPECIES if s in species]
         st.session_state.species_selector = random.choice(common_species or species)
+
+
+def _apply_deep_link(countries, language_code):
+    """Preselect country/site/species from the URL, e.g. links from the dashboard:
+    ?country=Norway&cluster=Lillehammer&species=Cuculus%20canorus
+    (``site`` may be given instead of ``cluster``). Returns True if applied."""
+    params = st.query_params
+    country = params.get("country")
+    if country not in countries:
+        return False
+    st.session_state.country_selector = country
+
+    sites = get_sites_for_country(country)
+    if not sites:
+        return True
+    species = params.get("species")
+    site_param = params.get("site")
+    cluster_param = params.get("cluster")
+
+    if site_param in sites:
+        candidates = [site_param]
+    elif cluster_param:
+        site_map = get_device_site_map()
+        candidates = [
+            name
+            for name, device_id in sites.items()
+            if site_map.get(device_id, {}).get("cluster") == cluster_param
+        ] or list(sites)
+    else:
+        candidates = list(sites)
+    random.shuffle(candidates)
+
+    # Prefer a site where the requested species has detections.
+    chosen = candidates[0]
+    if species:
+        for name in candidates:
+            if species in get_species_for_site(country, sites[name]):
+                chosen = name
+                break
+    st.session_state.site_selector = chosen
+
+    detected = get_species_for_site(country, sites[chosen])
+    if species and species in detected:
+        display = get_species_display_names([species], language_code)
+        st.session_state.species_selector = next(iter(display))
+    return True
 
 
 def _render_datetime_filter(country, device_id):
@@ -109,7 +159,8 @@ def get_user_selections():
 
     countries = get_available_countries()
     if "selections_initialized" not in st.session_state:
-        _randomize_initial_selection(countries)
+        if not _apply_deep_link(countries, language_code):
+            _randomize_initial_selection(countries)
         st.session_state.selections_initialized = True
 
     country = st.sidebar.selectbox("Select Country", countries, key="country_selector")
