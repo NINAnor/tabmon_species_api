@@ -44,6 +44,7 @@ FP_SOURCE_OPTIONS = [
     "Environmental — Other Environmental Noise",
     "Anthropogenic — Aircraft",
     "Anthropogenic — Traffic/Car",
+    "Anthropogenic — Engine",
     "Anthropogenic — Other Anthropogenic",
     "Unclear",
 ]
@@ -62,6 +63,7 @@ _FP_CATEGORY_DETAIL_BY_LABEL = {
     ),
     "Anthropogenic — Aircraft": ("Anthropogenic", "Aircraft"),
     "Anthropogenic — Traffic/Car": ("Anthropogenic", "Traffic/Car"),
+    "Anthropogenic — Engine": ("Anthropogenic", "Engine"),
     "Anthropogenic — Other Anthropogenic": (
         "Anthropogenic",
         "Other Anthropogenic",
@@ -113,6 +115,49 @@ def _scientific_to_display_option(scientific_name, language_code, all_species):
     return candidate if candidate in all_species else None
 
 
+def species_options_detected_first(detected_species, language_code, all_species):
+    """Species picker options with the clip's BirdNET-detected species
+    (in the given order) first, followed by every other species."""
+    detected_options = list(
+        dict.fromkeys(
+            _scientific_to_display_option(species, language_code, all_species)
+            or species
+            for species in detected_species
+        )
+    )
+    detected_set = set(detected_options)
+    return detected_options + [s for s in all_species if s not in detected_set]
+
+
+def sorted_detections(species_list, confidence_list):
+    """[(species, confidence)] sorted by BirdNET confidence, descending."""
+    return sorted(
+        [
+            (
+                species,
+                float(confidence_list[idx]) if idx < len(confidence_list) else 0.0,
+            )
+            for idx, species in enumerate(species_list)
+        ],
+        key=lambda detection: detection[1],
+        reverse=True,
+    )
+
+
+def confirm_empty_submission(state_key):
+    """Ask for a second submit before saving an annotation with nothing
+    selected (e.g. Space pressed by accident). Returns True on the second
+    attempt."""
+    if st.session_state.get(state_key):
+        return True
+    st.session_state[state_key] = True
+    st.warning(
+        "⚠️ Nothing is selected for this clip. Press Submit (or Space) again "
+        "to save it as an empty annotation."
+    )
+    return False
+
+
 def render_fp_characterization(prefix, fk, all_species, last_fp):
     """False-Positive characterization block, rendered OUTSIDE the form.
 
@@ -123,7 +168,8 @@ def render_fp_characterization(prefix, fk, all_species, last_fp):
     Args:
         prefix: Key prefix ("fp" in the validation form, "xfp" in review).
         fk: Form key so all widget keys reset when the clip changes.
-        all_species: Options for the confuser-species picker.
+        all_species: Options for the confuser-species picker (see
+            `species_options_detected_first`).
         last_fp: Prefill dict (see `_parse_validation_record_for_prefill`).
     """
     st.markdown("#### 🔬 False-Positive assessment (optional)")
@@ -177,8 +223,8 @@ def render_fp_characterization(prefix, fk, all_species, last_fp):
             )
         if FP_SOURCE_OTHER_BIRD in ticked_sources:
             st.text_input(
-                "If 'Other bird (unidentified)': describe "
-                "(e.g. 'lark, sparrow, finch, etc.')",
+                "If 'Other bird (unidentified)': describe, if possible "
+                "(optional, e.g. 'lark, sparrow, finch, etc.')",
                 value=last_fp.get("fp_other_bird_text", ""),
                 key=f"{prefix}_other_bird_{fk}",
             )
@@ -341,15 +387,6 @@ def _build_fp_columns(fp_values, rejected_species, has_detections):
             None,
         )
 
-    if FP_SOURCE_OTHER_BIRD in ticked and not (
-        fp_values.get("fp_other_bird_text") or ""
-    ).strip():
-        return (
-            "🔬 You ticked 'Other bird (unidentified)' — please describe it "
-            "(which family/type of bird did you hear?).",
-            None,
-        )
-
     categories = []
     details = []
     for sig in ticked:
@@ -358,7 +395,7 @@ def _build_fp_columns(fp_values, rejected_species, has_detections):
             details.append(extract_scientific(fp_values.get("fp_species")))
         elif sig == FP_SOURCE_OTHER_BIRD:
             categories.append("Other bird")
-            details.append(fp_values.get("fp_other_bird_text", "").strip())
+            details.append((fp_values.get("fp_other_bird_text") or "").strip())
         else:
             category, detail = _FP_CATEGORY_DETAIL_BY_LABEL.get(sig, (sig, ""))
             categories.append(category)
@@ -532,8 +569,19 @@ def render_pro_validation_form(result, selections):
         # form so the assessment checkbox opens the FP fields immediately.
         # Applies to the BirdNET-detected species that were rejected (left
         # unchecked, or covered by 'None of the listed species are present').
+        species_data = sorted_detections(
+            result.get("species_array", []) or [],
+            result.get("confidence_array", []) or [],
+        )
         render_fp_characterization(
-            "fp", fk, all_species_for_prefill, last_fp
+            "fp",
+            fk,
+            species_options_detected_first(
+                [species for species, _ in species_data],
+                language_code,
+                all_species_for_prefill,
+            ),
+            last_fp,
         )
 
         add_form_shortcuts(
@@ -553,25 +601,6 @@ def render_pro_validation_form(result, selections):
             st.markdown("#### Species detected by BirdNET in this clip:")
             st.markdown("**Select which species you can actually hear:**")
             st.markdown("---")
-
-            # Get species and confidence arrays (DuckDB returns actual lists)
-            species_list = result.get("species_array", []) or []
-            confidence_list = result.get("confidence_array", []) or []
-
-            # Sort species by confidence (descending)
-            species_data = sorted(
-                [
-                    (
-                        species,
-                        float(confidence_list[idx])
-                        if idx < len(confidence_list)
-                        else 0.0,
-                    )
-                    for idx, species in enumerate(species_list)
-                ],
-                key=lambda x: x[1],
-                reverse=True,
-            )
 
             # Get translations
             scientific_names = [species for species, _ in species_data]
@@ -709,6 +738,7 @@ def render_pro_validation_form(result, selections):
                 "Other Animal",
                 "Aircraft",
                 "Traffic/Car",
+                "Engine",
                 "Construction",
                 "Human Voices",
                 "Other Anthropogenic",
@@ -813,6 +843,11 @@ def _handle_pro_validation_submission(
             fp_assessment,
         ]
     )
+    if is_empty_submission and not confirm_empty_submission(
+        f"expert_confirm_empty_{st.session_state.get('expert_form_key', 0)}"
+    ):
+        return
+
     fp_certainty = (fp_values or {}).get("fp_certainty")
     if not is_empty_submission and not user_confidence and not fp_certainty:
         st.error(

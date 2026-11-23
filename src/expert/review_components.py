@@ -21,7 +21,9 @@ from expert.validation import (
     _build_fp_columns,
     _collect_fp_widget_values,
     _parse_validation_record_for_prefill,
+    confirm_empty_submission,
     render_fp_characterization,
+    species_options_detected_first,
 )
 
 
@@ -361,7 +363,17 @@ def _render_cross_validation_form(record, selections):
                 record, language_code, review_all_species
             )
             last_fp = parsed_own.get("fp_form_data") or {}
-        render_fp_characterization("xfp", fk, review_all_species, last_fp)
+        _, _, detections = _parse_birdnet_lists(record)
+        render_fp_characterization(
+            "xfp",
+            fk,
+            species_options_detected_first(
+                [species for species, _ in detections],
+                language_code,
+                review_all_species,
+            ),
+            last_fp,
+        )
 
         add_form_shortcuts(
             review_species_0_="1",
@@ -573,9 +585,8 @@ def _handle_cross_validation_submission(
     """Handle cross-validation or update form submission."""
     # Collect the FP block's widget values once (the block lives outside
     # the form).
-    fp_values = _collect_fp_widget_values(
-        "xfp", st.session_state.get("review_form_key", 0)
-    )
+    fk = st.session_state.get("review_form_key", 0)
+    fp_values = _collect_fp_widget_values("xfp", fk)
 
     # A submission with nothing selected is valid and saved with an empty
     # identified_species. Otherwise, confidence or FP certainty is required.
@@ -584,6 +595,11 @@ def _handle_cross_validation_submission(
         and not extra_species_raw
         and not fp_values.get("assessment")
     )
+    if is_empty_submission and not confirm_empty_submission(
+        f"review_confirm_empty_{fk}"
+    ):
+        return
+
     if (
         not is_empty_submission
         and not user_confidence
