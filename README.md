@@ -73,19 +73,23 @@ graph TB
 git clone https://github.com/NINAnor/tabmon_species_api.git
 ```
 
-2. For local Compose, copy `.env.example` to `.env` and set your S3 credentials. In Portainer, enter `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and `S3_BUCKET` as stack environment variables instead; Compose passes them into both containers. Do not commit credentials.
+2. Copy `.env.example` to `.env` and set your S3 credentials (never commit `.env`). Other parameters (S3 prefixes, audio settings) are in `src/config.py`.
 
-3. Run both apps:
+3. Run both apps locally:
 
 ```bash
 docker compose up --build -d
 ```
 
-The expert app is served on port `8505` and the citizen app on port `8506`. The container runs the app selected by the `APP` environment variable (`expert` or `citizen`). To run a single app locally:
+The expert app is served on port `8505` and the citizen app on port `8506`. The container runs the app selected by the required `APP` environment variable (`expert` or `citizen`). To run a single app without Docker:
 
 ```bash
 uv run streamlit run src/expert_app.py   # or src/citizen_app.py
 ```
+
+### Deployment
+
+Every push to `main` builds the image `ghcr.io/ninanor/tabmon_species_api:main` (GitHub Actions). Production is deployed from the `miljodata-infrastructure` repository, which runs this image twice with `APP=citizen` (`services/tabmon/listening-lab`) and `APP=expert` (`services/tabmon/listening-lab-expert`). To release a new version, update the pinned image digest in both stacks and redeploy them in Portainer.
 
 > [!WARNING]
 > The prediction parquet files (`PREDICTIONS_S3_PREFIX`), the expert datasets and `SITE_INFO_S3_PATH` have a very specific format and you may need to modify the code to fit your own dataset.

@@ -3,12 +3,11 @@
 set -o errexit
 set -o pipefail
 
-# APP selects which app to run: "expert" (default) or "citizen"
-APP="${APP:-expert}"
-
-case "$APP" in
+# APP selects which app to run: "expert" or "citizen". It is required so a
+# deployment can never silently serve the wrong app.
+case "${APP:-}" in
   expert|citizen) ;;
-  *) echo "Unknown APP '$APP' (expected 'expert' or 'citizen')" >&2; exit 1 ;;
+  *) echo "APP must be set to 'expert' or 'citizen' (got '${APP:-}')" >&2; exit 1 ;;
 esac
 
 exec uv run streamlit run "src/${APP}_app.py"
